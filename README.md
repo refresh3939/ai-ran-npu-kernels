@@ -24,6 +24,13 @@ AI-RAN 通信算法的 NPU 算子与收发链实现。
 
 项目采用模块化目录组织，既可独立构建和验证单个算子，也可运行完整通信链路。
 
+## 运行环境
+
+- 硬件平台：华为昇腾 Ascend 310P；
+- SoC 配置：当前构建脚本默认使用 `SOC_VERSION=Ascend310P1`；
+- 软件环境：CANN/AscendC、CMake、GNU Make 和 Python 3；
+- 操作系统：Linux。
+
 ## 使用方法
 
 准备好昇腾 CANN 环境，并设置工具链路径：
@@ -48,4 +55,4 @@ bash chain/pusch_mimo_tx_chain/run.sh 4 23
 bash chain/pusch_mimo_rx_chain/run.sh
 ```
 
-运行前请根据对应脚本准备测试数据和权重；默认目标平台为 Ascend 310P1。
+运行前请根据对应脚本准备测试数据和权重。
