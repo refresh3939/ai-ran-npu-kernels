@@ -1,0 +1,215 @@
+schema_version: 1
+
+id: R1
+id_provenance: rx_chain_R1_pss_stage_mapped_to_current_pss_acquisition
+name: pss_acquisition
+category: sync
+domain: sync
+chain: rx
+stage: cold_sync_pss_coarse_acquisition
+status: implemented_needs_clean_revalidation
+knowledge_status: extracted_and_source_checked
+
+paths:
+  source: kernels/sync/pss_acquisition
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/pss_acquisition
+  knowledge: kernels/sync/pss_acquisition/KNOWLEDGE.md
+  conversation: conversations/R1_pss_acquisition.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_tested_soc: Ascend310P3
+  historical_cann_version: 8.0.0
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  inputs:
+    - name: input_iq
+      dtype: int16
+      shape: [61440]
+      logical_shape: [30720, 2]
+      layout: interleaved_iq
+      quantization: Q8.8
+      bytes: 122880
+    - name: pss_templates
+      dtype: int16
+      shape: [3, 2048, 2]
+      layout: pss_id_sample_interleaved_iq
+      quantization: Q8.8
+      bytes: 24576
+    - name: scratch
+      dtype: float32
+      shape: [8]
+      bytes: 32
+      current_kernel_usage: placeholder_not_written
+    - name: workspace
+      dtype: uint8
+      shape: platform_lib_api_workspace
+      current_kernel_usage: unused_parameter
+  outputs:
+    - name: metric_cube_padded
+      dtype: float32
+      shape: [4, 401, 32]
+      logical_shape: [21, 3, 401]
+      bytes: 205312
+      layout: batch_time_hyp8_pss4
+      host_reduction: global_argmax
+    - name: host_result
+      dtype: mixed_scalar
+      shape: [4]
+      materialized_as_separate_device_output: false
+      fields:
+        - {name: cfo_hz, dtype: float32}
+        - {name: pss_id_n_id_2, dtype: int32}
+        - {name: time_shift_samples, dtype: int32}
+        - {name: peak_metric, dtype: float32}
+
+algorithm:
+  family: 5g_nr_pss_matched_filter_hypothesis_search
+  standard_reference: 3GPP_TS_38.211_section_7.4.2.2
+  implementation: time_domain_exhaustive_search
+  numerology: 1
+  scs_hz: 30000
+  fft_size: 2048
+  sample_rate_hz: 61440000
+  symbols_per_slot: 14
+  samples_per_slot: 30720
+  cp_lengths:
+    first_symbol: 176
+    other_symbols: 144
+  expected_ssb_useful_start_sample: 176
+  pss_candidates: 3
+  pss_sequence_length: 127
+  frequency_hypotheses:
+    count: 21
+    minimum_hz: -50000
+    maximum_hz: 50000
+    step_hz: 5000
+  time_hypotheses:
+    count: 401
+    minimum_shift_samples: -200
+    maximum_shift_samples: 200
+    invalid_negative_window_candidates_zero_filled: 24
+  total_correlations: 25263
+  samples_per_correlation: 2048
+  metric: squared_complex_correlation_magnitude
+
+execution:
+  engine: AIV_vector
+  batch:
+    unit: slot
+    size: 1
+    runtime_parameterized: false
+  hypothesis_batch_size: 6
+  hypothesis_batches: [6, 6, 6, 3]
+  block_dim: 4
+  core_split_dimension: time_offset
+  time_offsets_per_core_max: 101
+  core_assignment:
+    aiv_0: "[0,101)"
+    aiv_1: "[101,202)"
+    aiv_2: "[202,303)"
+    aiv_3: "[303,401)"
+  aiv_mapping_xor_2: false
+  reduction:
+    dtype: float16
+    primitive: WholeReduceSum
+    stages: ["2048_to_16", "16_to_1"]
+  final_argmax_location: host
+  ub_static_allocation_kib: 152
+  output_write_block_bytes: 128
+  tiling: zero_placeholder_128_bytes
+
+commands:
+  generate: env -u AIRAN_DATA_DIR python3 scripts/pss_acquisition_ref.py
+  generate_templates: env -u AIRAN_DATA_DIR python3 scripts/gen_pss_templates.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  status: historical_pass_current_clean_unverified
+  reference: numpy_time_domain_exhaustive_search
+  comparison:
+    pss_id: exact
+    time_shift_samples_absolute_tolerance: 2
+    cfo_hz_absolute_tolerance: 2500
+  historical_cases:
+    count: 5
+    cfo_hz: [0, 500, 25000, -45000, 12500]
+    pss_ids: [0, 0, 1, 2, 0]
+    time_shift_samples: [0, 0, 50, -80, 130]
+  historical_result:
+    soc: Ascend310P3
+    passed: 5
+    total: 5
+  current_coverage_gap:
+    - no_elementwise_python_metric_cube_comparison
+    - no_AWGN_multipath_or_fading_sweep
+    - no_no_signal_or_false_alarm_test
+    - no_reduction_dynamic_range_boundary_test
+
+performance:
+  status: historical_needs_revalidation
+  metric_scope: kernel_launch_through_stream_synchronize
+  excludes:
+    - input_H2D
+    - output_D2H
+    - host_argmax
+  historical_final_path:
+    soc: Ascend310P3
+    cann: 8.0.0
+    warmup_runs: 10
+    timed_runs: 50
+    min_us: 4632.3
+    average_us: 4775.6
+    p50_us: 4765.6
+    p99_us: 5405.8
+    max_us: 5405.8
+  baseline_p50_us: 5549.2
+  whole_reduce_sum_improvement_percent: 14
+  msprof_status: not_available_in_conversation
+  rejected_precomputed_cos_sin_path:
+    observed_p50_us: 4696.8
+    reason: marginal_1.5_percent_gain_did_not_justify_192KB_table_and_extra_interface
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/rx/pss_acquisition/**/*.bin
+  - data/golden/rx/pss_acquisition/**/meta.json
+  - data/ascend_output/**/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "*.zip"
+
+known_limitations:
+  - fixed_mu1_fft2048_single_slot_single_antenna_Q8_8
+  - fixed_search_center_and_plus_or_minus_200_sample_window
+  - coarse_CFO_grid_only_with_5kHz_step
+  - no_detection_threshold_confidence_or_invalid_result
+  - first_24_negative_window_hypotheses_are_zero_filled
+  - synthetic_five_case_coverage_only
+  - fp16_reduction_dynamic_range_not_boundary_tested
+  - metric_cube_not_elementwise_compared_with_python
+  - AIRAN_DATA_DIR_generation_path_missing_data_component
+  - stale_batch_count_comments_in_kernel_and_verify_script
+  - cpu_debug_path_not_historically_verified
+  - clean_migration_not_built_or_benchmarked
+
+next_tasks:
+  - fix_AIRAN_DATA_DIR_contract_and_stale_comments
+  - regenerate_and_revalidate_clean_version_on_Ascend310P3
+  - record_git_commit_CANN_SOC_and_raw_logs
+  - add_AWGN_multipath_random_boundary_and_no_signal_cases
+  - compare_NPU_metric_cube_against_python_with_defined_tolerance
+  - add_peak_to_sidelobe_confidence_and_no_detection_result
+  - test_fp16_reduction_dynamic_range_limits
+  - profile_with_msprof_before_further_optimization
+  - validate_end_to_end_sign_and_window_contract_with_downstream_sync_operators
+

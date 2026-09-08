@@ -1,0 +1,192 @@
+schema_version: 1
+
+id: R5
+name: ofdm_demod_siso
+aliases: [ofdm_demod]
+category: ofdm
+domain: ofdm
+chain: rx
+spatial_mode: siso
+status: implemented_npu_verified_single_slot
+knowledge_status: extracted_current_source_audited
+
+paths:
+  source: kernels/ofdm/ofdm_demod_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/ofdm_demod
+  knowledge: kernels/ofdm/ofdm_demod_siso/KNOWLEDGE.md
+  conversation: conversations/R5_ofdm_demod.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  default_soc_version: Ascend310P3
+  historical_cann_version: 8.0.0
+  current_cann_requirement: not_pinned
+
+interface:
+  input:
+    name: input_iq
+    dtype: int16
+    logical_dtype: complex_q8_8
+    shape: [30720, 2]
+    layout: interleaved_iq
+    contains_cyclic_prefix: true
+  outputs:
+    - name: output_re
+      dtype: float16
+      shape: [14, 32, 64]
+      layout: stage4_dft64_nd
+    - name: output_im
+      dtype: float16
+      shape: [14, 32, 64]
+      layout: stage4_dft64_nd
+  output_contract: unitary_unshifted_stage4_not_final_fftshifted_output
+
+algorithm:
+  family: 5g_nr_cp_ofdm_demod
+  implementation: mixed_radix_32x64_low_level_mmad
+  fused_chain_steps:
+    - cp_removal
+    - fft_2048_core
+  fft_size: 2048
+  symbols_per_slot: 14
+  samples_per_slot: 30720
+  cyclic_prefix_lengths:
+    first: 176
+    other: 144
+  radix_p: 32
+  radix_q: 64
+  input_scale: 0.00390625
+  unitary_normalization_in_kernel: true
+  unitary_normalization_method: folded_into_dft32_and_dft64_weights
+  phase_compensation_in_kernel: false
+  fftshift_in_kernel: false
+  complex_matmul_lowering: four_real_mmad
+  fused_mmad_accumulation: true
+  phase1_rhs_tile_reused_for_real_and_imag_outputs: true
+  phase1_weights_resident_in_l0a: true
+  phase3_symbols_stacked_on_m: true
+  phase3_weights_resident_in_l0b: true
+  max_phase3_m: 128
+  n_sub: 16
+  n_splits: 4
+  phase1_k: 32
+  phase3_k: 64
+
+execution:
+  batch_parameter: compile_time_single_slot
+  batch_slots: 1
+  block_dim: 4
+  symbols_per_core_capacity: 4
+  symbol_assignment: contiguous_4_4_4_2
+  scratch_allocated_bytes_per_core: 32768
+  scratch_kernel_stride_bytes_per_core: 32768
+  scratch_lifetime_aliasing: xre_xim_reused_as_twre_twim
+  optional_batch_scratch_bytes_per_core: 65536
+  optional_batch_scratch_lifetime_aliasing: disabled_due_observed_mte_race
+  inter_core_sync: none_in_default_single_slot_phase_barriers_in_optional_batch
+  local_scratch_dependency: mte3_to_mte2_event
+  tiling_mode: placeholder_not_consumed_by_kernel
+  workspace_consumed_by_kernel: false
+
+commands:
+  generate: python3 scripts/ofdm_demod_ref.py
+  run_ascend310p3: bash run.sh -r npu -v Ascend310P3
+  run_ascend310p1: bash run.sh -r npu -v Ascend310P1
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  reference_primary: data/golden/stage4_dft64.bin
+  reference_optional: Sionna_OFDMDemodulator
+  comparison: per_symbol_max_abs_error_re_and_im
+  absolute_tolerance: 0.05
+  required_symbols_passed: 14
+  success_pattern: "[verify] ========== PASS (14/14) =========="
+  current_exact_source_status: pass_14_of_14_on_original_source_build
+  current_overall_max_abs_error: 0.0018
+  golden_input_basis: dequantized_saved_q8_8_input
+  python_self_checks:
+    mixed_radix_vs_numpy_atol: 0.0001
+    four_real_vs_complex_atol: 0.0001
+    sionna_atol: 0.001
+
+performance:
+  status: current_single_slot_verified
+  primary_metric_scope: msprof_device_task
+  host_metric_scope: kernel_launch_plus_stream_sync_excluding_transfers
+  warmup_runs: 10
+  timed_runs: 50
+  msprof_status: collected_pipe_utilization
+  historical_immediately_prior_stable:
+    latency_min_us: 140.2
+    correctness: pass_14_of_14
+  historical_range_after_repeat:
+    latency_min_us: 140.6
+  current_ascend310p1:
+    host_latency_min_us: 56.9
+    host_latency_avg_us: 61.3
+    host_latency_p50_us: 63.6
+    host_latency_p99_us: 71.7
+    host_latency_max_us: 71.7
+    host_previous_same_day_run:
+      latency_min_us: 99.2
+      latency_avg_us: 103.8
+      latency_p50_us: 102.6
+      latency_p99_us: 113.5
+      latency_max_us: 113.5
+      interpretation: host_scheduler_variance_not_device_task_regression
+    msprof_median_us:
+      task: 29.791
+      aicore: 26.430
+      vector: 4.420
+      scalar: 17.377
+      mte1: 1.239
+      mte2: 8.959
+      mte3: 2.226
+      mac: 1.118
+    msprof_task_min_us: 29.452
+    msprof_task_max_us: 30.494
+    comparison_ofdm_mod_task_median_us: 35.806
+    relative_task_reduction_vs_ofdm_mod_percent: 16.8
+    correctness: pass_14_of_14
+    overall_max_abs_error: 0.0018
+    measured_on: 2026-09-06
+    provenance: original_source_build_not_clean_directory_rebuild
+  realtime_budget_us: 500
+  optimization_performance_status: verified_under_40us_device_task_on_ascend310p1_single_slot
+
+generated_artifacts:
+  - weights/**
+  - data/golden/**
+  - data/ascend_output/**
+  - build/**
+  - out/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "*.bin"
+  - "*.zip"
+
+known_limitations:
+  - fixed_fft2048_and_14_symbols
+  - fixed_cp_pattern_176_then_144
+  - fixed_block_dim_4
+  - fuses_r4_cp_removal_with_r5_fft
+  - output_is_unitary_stage4_but_not_fftshifted
+  - generated_weights_and_goldens_required
+  - cann_version_not_pinned
+  - clean_directory_not_independently_rebuilt_on_npu
+  - default_single_slot_path_needs_long_stress_validation
+  - optional_batch_uses_m32_and_syncall_after_long_stress_corruption_observation
+  - acl_errors_are_logged_but_not_fatal
+
+next_tasks:
+  - independently_rebuild_and_revalidate_clean_source_on_npu
+  - long_stress_test_default_single_slot_path
+  - settle_r4_r5_fusion_boundary
+  - settle_final_output_layout_contract
+  - create_controlled_phase0_scalar_mte2_optimization_probe
+  - create_minimal_probes_for_multi_tiling_n64_nd2nz_and_fixpipe
+  - strengthen_error_propagation_and_file_size_checks

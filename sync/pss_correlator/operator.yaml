@@ -1,0 +1,206 @@
+schema_version: 1
+
+id: R1
+id_provenance: rx_chain_status_maps_R1_to_pss_correlator
+id_conflict: legacy_pss_acquisition_is_also_registered_as_R1_in_clean_tree
+name: pss_correlator
+category: sync
+domain: sync
+chain: rx
+stage: cold_sync_pss_integer_cfo_and_timing_search
+status: source_incomplete_unbuildable_needs_restore_and_revalidation
+knowledge_status: extracted_source_checked_and_historical_claims_classified
+
+paths:
+  source: kernels/sync/pss_correlator
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/pss_correlator
+  knowledge: kernels/sync/pss_correlator/KNOWLEDGE.md
+  conversation: conversations/R1_pss_correlator.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_tested_soc: Ascend310P3
+  historical_cann_version: 8.0.0
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  inputs:
+    - name: rx
+      dtype: int16
+      shape: [153600, 2]
+      layout: interleaved_iq
+      quantization: Q2.13
+      bytes: 614400
+    - name: pss_ref_nz
+      dtype: float16
+      shape: [2, 256, 16]
+      logical_shape: [3, 256]
+      layout: real_nz_then_imag_nz_first_3_columns_valid
+      bytes: 16384
+      current_generation_status: converter_exists_but_is_not_wired_into_run_sh
+    - name: twiddle
+      dtype: int16
+      shape: [3, 153600, 2]
+      layout: g_sample_interleaved_iq
+      quantization: Q2.13
+      bytes: 1843200
+    - name: workspace
+      dtype: uint8
+      shape: platform_lib_api_workspace
+    - name: tiling
+      dtype: uint8
+      shape: [sizeof_TCubeTiling]
+      current_kernel_usage: placeholder
+  internal_outputs:
+    - name: stage1_yG
+      dtype: float16
+      shape: [3, 2, 153600]
+      bytes: 1843200
+    - name: per_tile_reduce
+      dtype: float32
+      shape: [3, 4, 300, 16]
+      logical_fields_per_pss: [peak, local_index, sum, count]
+      bytes: 230400
+  physical_output:
+    name: output
+    dtype: uint16
+    shape: [16]
+    bytes: 32
+    current_semantics: sentinel_debug_buffer_not_stable_five_scalar_abi
+  logical_outputs:
+    - {name: mu_t, dtype: int32, shape: [], meaning: pss_useful_start_sample}
+    - {name: n_id_2, dtype: int32, shape: [], values: [0, 1, 2]}
+    - {name: g_hat, dtype: int32, shape: [], values: [-1, 0, 1]}
+    - {name: peak, dtype: float32, shape: []}
+    - {name: noise_floor, dtype: float32, shape: [], contract_conflict: python_median_vs_historical_npu_mean}
+
+algorithm:
+  family: 5g_nr_pss_matched_filter_integer_cfo_joint_search
+  standard_reference: 3GPP_TS_38.211_section_7.4.2.2
+  sample_rate_hz: 7680000
+  scs_hz: 30000
+  fft_size: 256
+  search_samples: 153600
+  matched_filter_samples: 256
+  mathematical_window_count: 153345
+  historical_npu_window_count: 153344
+  pss_candidates: 3
+  integer_cfo_bins: [-1, 0, 1]
+  quantization_fraction_bits: 13
+  quantization_scale: 8192
+  first_cp_samples: 44
+  metric: squared_complex_correlation_magnitude
+
+execution:
+  engine: mixed_vector_cube_scalar_with_host_final_reduce
+  batch:
+    unit: search_window
+    size: 1
+    runtime_parameterized: false
+  block_dim: 4
+  stage1_tile_samples: 1920
+  stage23_m_tile: 128
+  stage23_mmad_m: 16
+  stage23_k: 256
+  stage23_n_padded: 16
+  stage23_valid_n: 3
+  mu_per_aiv: 38336
+  tiles_per_aiv: 300
+  tail_valid_mu: 64
+  source_completion:
+    kernel_line_count: 455
+    member_definitions_present: false
+    global_kernel_entry_present: false
+
+commands:
+  generate_reference_nd: python3 scripts/pss_correlator_ref.py
+  generate_nz_staging: python3 scripts/gen_pss_nz_ref.py data/golden/rx/pss_correlator/pss_ref.bin data/golden/rx/pss_correlator/pss_ref_nz.bin
+  run_after_source_restore: bash run.sh -r npu -v Ascend310P3
+  run_all_after_source_restore: bash run.sh -a
+  verify_after_run: python3 scripts/verify_result.py
+  static_shell_check: bash -n run.sh
+  note: current_generate_run_chain_is_not_operational_and_npu_commands_were_not_run_during_migration
+
+correctness:
+  status: historical_pass_current_clean_unverified_and_source_unbuildable
+  reference: numpy_fft_linear_correlation
+  reference_criteria:
+    n_id_2: exact
+    g_hat: exact
+    mu_t_absolute_tolerance_samples: 2
+    peak_over_noise_minimum: 4.0
+  current_end_to_end_verifier:
+    fields_checked_exactly: [g_hat, n_id_2, mu_t]
+    fields_not_checked: [peak, noise_floor, full_metric]
+  historical_cases:
+    count: 8
+    snr_db: [30, 30, 30, 30, 30, 30, 0, -3]
+    cfo_hz: [0, 10000, -10000, 25000, -25000, 45000, 5000, -8000]
+    pss_ids: [0, 1, 2, 0, 1, 2, 1, 0]
+  historical_result:
+    status: HISTORICAL
+    soc: Ascend310P3
+    passed: 8
+    total: 8
+
+performance:
+  status: historical_needs_revalidation
+  metric_scope: kernel_launch_through_stream_synchronize
+  excludes: [input_H2D, output_D2H, file_IO, python_reference, host_final_reduce]
+  warmup_runs: 5
+  timed_runs: 20
+  historical_final_p50_ms_range: [20.8, 21.8]
+  historical_best_case0_after_precise_event_p50_us: 20840.8
+  msprof_historical:
+    aicore_time_us: 20646
+    scalar_time_us: 16128
+    scalar_ratio_percent: 78.1
+    mte2_time_us: 7835
+    mte2_ratio_percent: 38.0
+    mac_time_us: 1307
+    mac_ratio_percent: 6.3
+    cube_utilization_percent: 39.98
+    memory_bound: 6.03
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**/*.bin
+  - data/golden/**/case_meta.json
+  - data/golden/**/meta.json
+  - data/ascend_output/**/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "*.zip"
+  - "**/__pycache__/**"
+
+known_limitations:
+  - current_kernel_declarations_only_missing_definitions_and_entry
+  - reference_generates_3072B_ND_pss_but_host_requires_16384B_NZ_pss
+  - run_sh_does_not_wire_ND_to_NZ_conversion
+  - python_noise_floor_is_median_but_npu_host_path_is_mean
+  - physical_output_is_not_a_stable_serialized_five_scalar_result
+  - last_mathematically_valid_window_is_not_covered_by_historical_npu_partition
+  - fixed_single_antenna_30kHz_SCS_7.68MSPS_20ms_Q2.13
+  - integer_CFO_search_only_minus1_to_plus1_subcarrier
+  - synthetic_eight_case_history_only
+  - no_noise_only_multicell_fading_real_RF_or_long_run_validation
+  - historical_performance_not_bound_to_current_source_hash
+  - duplicate_R1_id_with_legacy_pss_acquisition
+
+next_tasks:
+  - restore_complete_kernel_from_a_trusted_version_and_review_against_current_header
+  - integrate_ND_to_NZ_generation_and_assert_exact_input_sizes
+  - unify_noise_floor_definition
+  - implement_and_document_a_stable_five_scalar_output_ABI
+  - cover_or_explicitly_exclude_the_last_valid_window
+  - revalidate_all_eight_cases_on_clean_Ascend310P3
+  - record_source_commit_SOC_CANN_and_raw_correctness_and_benchmark_logs
+  - add_boundary_random_noise_only_multicell_fading_and_real_RF_tests
+  - resolve_global_R1_operator_id_collision

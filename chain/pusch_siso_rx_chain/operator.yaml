@@ -1,0 +1,223 @@
+schema_version: 1
+
+id: SISO_RX_CHAIN
+name: pusch_siso_rx_chain
+aliases:
+  - rx_chain
+  - siso_rx_chain
+legacy_ids:
+  - RX_CHAIN
+category: chain
+chain: rx
+status: migrated_paths_integrated_needs_npu_revalidation
+knowledge_status: extracted_source_reconciled_paths_updated_needs_npu_revalidation
+
+paths:
+  source: kernels/chain/pusch_siso_rx_chain
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/rx_chain
+  knowledge: kernels/chain/pusch_siso_rx_chain/KNOWLEDGE.md
+  conversation: conversations/RX_CHAIN_rx_chain.md
+  conversations:
+    - conversations/RX_CHAIN_rx_chain.md
+    - conversations/RX_CHAIN_rx_chain_v2.md
+
+target:
+  architecture: dav_m200
+  primary_soc: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_cann_version: 8.0.0
+  clean_runtime_verified: false
+
+interface:
+  spatial_mode: siso
+  num_rx_antennas: 1
+  num_layers: 1
+  num_codewords: 1
+  abi_scope: fixed_single_antenna_single_layer
+  unsupported_interfaces:
+    - mimo_channel_tensor_H_num_rx_by_num_layers
+    - layer_mapper_demapper
+    - multi_antenna_input_buffers
+    - precoding_matrix
+    - mimo_detector
+  inputs:
+    - name: capture_iq
+      dtype: int16_interleaved_iq
+      shape: [1228800, 2]
+      bytes: 4915200
+      sample_rate_hz: 61440000
+  outputs:
+    - name: information_bits
+      dtype: int8_bits_stored_as_bytes
+      shape: [143, 8448]
+      bytes: 1208064
+  intermediate_layouts:
+    slot_iq: {dtype: int16_interleaved_iq, shape: [30720, 2]}
+    fft_grid_re_im_planes: {dtype: fp16, shape_per_plane: [14, 2048]}
+    used_grid_re_im_planes: {dtype: fp16, shape_per_plane: [14, 1664], valid_subcarriers: 1596}
+    channel_re_im_planes: {dtype: fp16, shape_per_plane: [14, 1664]}
+    equalized_re_im_noeff_planes: {dtype: fp16, shape_per_plane: [14, 1664]}
+    qam_llr_padded: {dtype: int16, physical_shape: [23, 8, 12, 1600], qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]}
+    descrambled_llr_compact: {dtype: int16, shape: [23, 8, 19200], stream_order: canonical_nr_bit_0_through_7, valid_re_per_stream_slot: 19152}
+    ldpc_lambda: {dtype: int16, shape: [143, 26112]}
+
+algorithm:
+  family: 5g_nr_pusch_siso_rx
+  stages_acquire:
+    - decimate
+    - pss_correlator
+    - pss_cfo_estimator
+    - sss_correlator
+    - ssb_fft
+    - pbch_dmrs_correlator
+  stages_per_slot:
+    - win_slice
+    - cfo_estimate
+    - cfo_compensate
+    - ofdm_demod
+    - re_demap
+    - channel_est_ls
+    - equalize
+    - qam256_demod
+    - cfo_dmrs
+    - timing_tracker
+  stages_per_tb:
+    - descramble
+    - rate_dematch
+    - ldpc_decode
+  excluded_standalone_stage: llr_assemble
+  excluded_stage_reason: qam_padding_compaction_and_stream_permutation_are_fused_into_descramble
+  subcarrier_spacing_hz: 30000
+  fft_size: 2048
+  symbols_per_slot: 14
+  samples_per_slot: 30720
+  slots_per_tb: 23
+  resource_blocks: 133
+  used_subcarriers: 1596
+  used_subcarriers_padded: 1664
+  modulation: 256QAM
+  dmrs_symbols: [2, 11]
+  ldpc:
+    base_graph: BG1
+    lifting_size: 384
+    code_blocks: 143
+    information_bits_per_cb: 8448
+    full_llr_per_cb: 26112
+    check_block_rows: 46
+    base_graph_edges: 316
+  fixed_pusch_offset_samples: 52640
+
+execution:
+  batch:
+    parameterization: compile_time
+    slots: 23
+    code_blocks: 143
+  block_dim: 4
+  block_dim_override_env: RX_BLOCKDIM
+  stream_count: 1
+  workspace_initial_bytes: 16777216
+  generator_commands:
+    - "python3 scripts/gen_gold_sign.py data/weights/gold_sign.bin"
+    - "bash gen_tiling_shims.sh"
+    - "Generate every child operator weight/reference with its reviewed Python generator"
+  build_command: "bash run.sh"
+  run_command: "RX_PROFILE=0 bash run.sh"
+  benchmark_command: "RX_PROFILE=1 bash run.sh"
+  loopback_command: "RX_LB_IQ=/path/to/tx_iq.bin RX_LB_BER=1 RX_LB_TXBITS=/path/to/tx_bits.bin RX_CELL_ID=1 bash run.sh --loopback"
+  current_clean_availability: source_integrated_generated_weights_still_required
+  qam_kernel_source: mapping/qam_demod_256_siso/qam256_demod_kernel.cpp
+  qam_kernel_output_abi: padded_8_by_12_by_1600
+
+correctness:
+  status: historical_needs_clean_revalidation
+  standard: nonzero_full_coded_tx_rx_loopback_and_stage_boundary_checks
+  criteria:
+    - all_required_weights_present_no_zero_fill_warnings
+    - each_child_operator_reference_check_passes
+    - every_boundary_dtype_shape_stride_and_order_matches
+    - matched_cell_id_information_bit_errors_equal_zero_of_1208064
+    - mismatched_cell_id_ber_approximately_half
+    - no_device_runtime_error_or_watchdog
+  static_validation:
+    source_cmp: intentionally_diverged_for_clean_qam_abi_alignment
+    conversations_cmp: verified
+    shell_syntax: verified
+    python_ast: verified
+    yaml_parse: verified
+    forbidden_artifacts_absent: verified
+  historical_results:
+    - {test: zero_input_pipeline, result: ber_zero, status: REJECTED_AS_CORRECTNESS_EVIDENCE}
+    - {test: channel_est_five_cases, result: 5_of_5_pass_mse_approximately_1e-7, status: HISTORICAL}
+    - {test: win_slice_five_cases, result: 5_of_5_pass, status: HISTORICAL}
+    - {test: descramble_standalone, result: bit_exact_pass, status: HISTORICAL}
+    - {test: matched_cell_id_coded_loopback, result: zero_information_bit_errors, status: HISTORICAL}
+    - {test: mismatched_cell_id_coded_loopback, result: ber_approximately_half, status: HISTORICAL}
+
+performance:
+  status: historical_needs_23_slot_revalidation
+  environment:
+    soc: Ascend310P3
+    block_dim: 4
+    method: sustained_8_batches_x_20_launches_after_warmup
+    historical_slots_per_tb: 24
+  historical_latest_min_us:
+    acquire_sum: 21432.0
+    slot_sum: 248.0
+    tb_device_sum: 10601.0
+    ldpc_decode_per_tb: 10161.7
+    h2d_capture_4_92mb: 4578.0
+    d2h_bits_1_21mb: 2360.0
+    historical_per_slot_device_amortized: 689.0
+  budget:
+    slot_us: 500.0
+    current_23_slot_tb_window_us: 11500.0
+    historical_result: over_budget
+  msprof_status: raw_report_not_preserved
+  rejected_results:
+    - "ldpc_decode approximately 2.2 ms with missing/zero structure tables"
+    - "per-slot total approximately 353 us derived from the empty LDPC run"
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - tiling_shims/**
+  - data/**
+  - weights/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - msprof/**
+  - "*.bin"
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+  - "**/__pycache__/**"
+
+known_limitations:
+  - siso_single_layer_single_codeword_only
+  - fixed_BG1_Z384_143CB_23slot_256QAM_133RB_configuration
+  - clean_category_layout_is_not_compatible_with_original_rx_sibling_paths
+  - gen_tiling_shims_hardcodes_original_rx_root
+  - generated_weights_capture_and_golden_vectors_are_not_migrated
+  - missing_aux_files_can_zero_fill_and_create_false_pass_or_false_fast_profiles
+  - source_contains_stale_24_slot_comments_prints_and_shapes
+  - fixed_continuous_stream_pusch_offset_samples
+  - no_clean_rebuild_loopback_ota_cfo_or_sfo_validation
+  - aligned_descramble_qam_abi_not_yet_npu_revalidated
+  - historical_profile_exceeds_current_23_slot_budget_when_real_ldpc_and_d2h_are_counted
+  - raw_msprof_reports_not_preserved
+
+next_tasks:
+  - refactor_cmake_and_tiling_paths_for_clean_category_layout
+  - add_reproducible_child_weight_and_reference_generation
+  - make_missing_runtime_aux_files_fail_fast
+  - reconcile_all_23_vs_24_slot_constants_comments_buffers_and_reports
+  - rebuild_and_run_nonzero_matched_and_mismatched_cell_id_loopback
+  - run_continuous_stream_acquisition_and_cfo_sfo_sweep
+  - collect_23_slot_device_copy_wall_time_and_raw_msprof_reports
+  - validate_pinned_d2h_and_ldpc_syndrome_early_exit
+  - design_explicit_multi_antenna_multi_layer_abi_before_any_mimo_extension

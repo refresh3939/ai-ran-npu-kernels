@@ -1,0 +1,234 @@
+schema_version: 1
+
+id: T07
+name: scramble_siso
+aliases: [scramble]
+category: fec
+domain: fec
+chain: tx
+spatial_mode: siso
+status: grouped_padded_qam_abi_npu_verified
+knowledge_status: current_source_reference_and_adjacent_contract_aligned
+
+id_evidence:
+  canonical_tx_sequence:
+    - {id: T04, name: ldpc_encode}
+    - {id: T05, name: rate_matching}
+    - {id: T06, name: cb_concat, current_boundary: fused_into_rate_match_layout}
+    - {id: T07, name: scrambling}
+    - {id: T08, name: qam_modulate}
+  sources:
+    - /home/refresh/AI-RAN-NPU/PROJECT_MEMORY.md
+    - /home/refresh/AI-RAN-NPU/SKILLV1.md
+    - conversations/T04_ldpc_encode.md
+  conflicts:
+    - existing_qam_mod_256_manifest_uses_unpadded_id_T8
+    - clean_tx_ids_T04_and_T05_use_two_digit_format
+  resolution: use_T07_and_preserve_fused_T06_gap
+
+paths:
+  source: kernels/fec/scramble_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/scramble
+  knowledge: kernels/fec/scramble_siso/KNOWLEDGE.md
+  conversation: conversations/T07_scramble.md
+  conversations:
+    - conversations/T07_scramble.md
+    - conversations/T07_scramble_v2.md
+  conversation_scope: tx_chain_history_containing_scramble_not_scramble_only
+
+target:
+  architecture: dav_m200
+  primary_soc: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  clean_runtime_verified: true
+
+interface:
+  inputs:
+    - name: bits_in_gm
+      dtype: int16
+      shape: [23, 8, 19200]
+      layout: slot_stream_re
+      value_domain: [0, 1]
+      valid_re_per_stream_per_slot: 19152
+      padding_re_per_stream_per_slot: 48
+    - name: gold_gm
+      dtype: int16
+      shape: [23, 8, 19200]
+      layout: slot_stream_re
+      value_domain: [0, 1]
+      generated_on_host: true
+      stream_order: linear_modulation_bit_0_through_7
+      valid_re_per_stream_per_slot: 19152
+      padding_re_per_stream_per_slot: 48
+      padding_value: 0
+      padding_advances_gold: false
+    - name: n_slot_gm
+      dtype: int32
+      shape: [16]
+      semantics: element_0_is_active_slot_count_clamped_to_23
+    - name: workspace
+      dtype: opaque_device_pointer
+      used: false
+      purpose: combined_build_abi_tail_argument
+    - name: tiling
+      dtype: opaque_device_pointer
+      used: false
+      purpose: combined_build_abi_tail_argument
+  outputs:
+    - name: bits_out_gm
+      dtype: int16
+      shape: [23, 8, 12, 1600]
+      allocation_shape: [23, 8, 19200]
+      layout: slot_qam_stream_data_symbol_subcarrier
+      value_domain: [0, 1]
+      valid_subcarriers_per_symbol: 1596
+      padding_subcarriers_per_symbol: 4
+      padding_value: 0
+      qam_stream_order: [I_c0, I_c1, I_c2, I_c3, Q_c0, Q_c1, Q_c2, Q_c3]
+      qam_stream_to_linear_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+
+algorithm:
+  standard_intent: 3gpp_ts_38_211_pusch_codeword_scrambling
+  operation: bitwise_xor
+  kernel_equivalent: abs_bits_minus_gold
+  nc: 1600
+  c_init: "((n_rnti & 0xffff) << 15) | ((q & 1) << 14) | (n_id_cell & 0x3ff)"
+  default_parameters:
+    n_rnti: 12345
+    q: 0
+    n_id_source: cell_id
+  input_stream_order: linear_modulation_bit_0_through_7
+  output_qam_stream_to_linear_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+  gold_generation_extent: valid_23_by_19152_by_8_excluding_storage_padding
+  fused_layout_adapter: compact_linear_to_grouped_iq_symbol_padded
+  active_geometry:
+    slots: 23
+    streams: 8
+    valid_re_per_slot_stream: 19152
+    padded_re_per_slot_stream: 19200
+    valid_bits: 3523968
+    padded_elements: 3532800
+
+execution:
+  batch_scope: one_transport_block
+  block_dim: 4
+  logical_aiv_mapping: get_block_idx_xor_2
+  partition_axis: grouped_qam_stream
+  qam_streams_per_aiv: 2
+  vector_mask: 128
+  vector_repeats_per_stream: 150
+  ub_work_elements_per_buffer: 19200
+  estimated_ub_bytes_per_aiv: 115264
+  padding_zeroed_by_kernel: true
+  workspace_bytes: 4194304
+  tiling_bytes: 128
+  runtime_tiling_used: false
+
+adjacent_contracts:
+  upstream_rate_match:
+    dtype_shape: "int16 [23,8,19200]"
+    valid_padding: "19152 valid + 48 zero pad"
+    stream_semantics: linear_modulation_bit_index_j_0_to_7
+    dtype_shape_status: verified_compatible
+  downstream_qam_mod_256:
+    dtype_shape_per_slot: "int16 [8,12,1600]"
+    stream_semantics: grouped_i_then_q
+    grouped_stream_to_linear_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+    dtype_shape_status: verified_compatible
+    bit_order_status: verified_aligned
+    selected_implementation: sole_vector_batch3_padded
+  rx_descramble:
+    geometry_and_gold_mapping: strict_inverse
+    arithmetic: hard_xor_vs_soft_sign_flip
+    internal_round_trip_status: verified
+    standards_alignment_status: aligned_with_linear_valid_bit_sequence
+
+correctness:
+  reference: scripts/scramble_ref.py
+  npu_verifier: main.cpp_integrated_bit_exact_comparison
+  comparison: elementwise_bit_exact
+  tolerance: 0
+  current_lightweight_reference_status: verified_after_grouped_padded_change
+  current_npu_status: verified_on_ascend310p3
+  current_npu_result:
+    date: 2026-09-06
+    compared_elements: 3532800
+    mismatches: 0
+    padded_gap_nonzero: 0
+  historical_standalone:
+    geometry: [23, 8, 19200]
+    compared_elements: 3532800
+    mismatches: 0
+    status: HISTORICAL
+  historical_chain_round_trip:
+    qam_hard_bits_compared: 3523968
+    qam_hard_bit_errors: 0
+    descramble_hard_bits_compared: 3523968
+    descramble_hard_bit_errors: 0
+    status: HISTORICAL_INTERNAL_RECIPROCITY_ONLY
+
+resolved_contract_conflicts:
+  - id: stream_bit_order
+    resolution: scramble_permutates_linear_bits_to_qam_grouped_streams
+  - id: padding_advances_gold
+    resolution: gold_is_generated_only_for_valid_bits_and_storage_tail_is_zero
+  - id: qam_symbol_padding
+    resolution: scramble_inserts_four_explicit_zeros_after_each_1596_bit_symbol
+
+commands:
+  working_directory: kernels/fec/scramble_siso
+  syntax_shell: bash -n run.sh
+  syntax_python: python3_ast_parse_scripts_without_writing_pyc
+  generate_reference: PYTHONDONTWRITEBYTECODE=1 python3 scripts/scramble_ref.py
+  run_npu_310p3: bash run.sh -r npu -v Ascend310P3
+
+performance:
+  status: observed_current_host_wall_clock_no_msprof
+  current_result:
+    date: 2026-09-06
+    soc: Ascend310P3
+    ms_per_tb: 0.219
+    us_per_slot: 9.54
+  historical_current_chain_manifest_min_us_per_tb: 195.2
+  historical_old_24_slot_conversation_min_us_per_tb_range: [104.8, 113.3]
+  comparability: false
+  msprof_available: false
+
+migration:
+  source_files_copied: 11
+  source_cmp_status: intentionally_diverged_after_qam_abi_alignment
+  conversation_files_archived: 2
+  conversation_sha256: 65ecd936bb616b744e9cd0881a2385886423db8ca34a3609f4c733d8b7890dfd
+  conversations_are_duplicate_content: true
+  source_directory_preserved: true
+  gitignore_update_required: false
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - profiling/**
+  - data/**/*.bin
+  - test_data/**/*.bin
+  - scripts/test_data/**/*.bin
+  - "**/__pycache__/**"
+  - "*.pyc"
+  - "*.bin"
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+
+known_limitations:
+  - fixed_23_slot_8_stream_19200_stride_geometry
+  - fixed_pusch_seed_formula_and_host_generated_gold
+  - n_slot_is_only_active_count_not_physical_slot_seed
+  - input_domain_not_checked_by_kernel
+  - runtime_tiling_and_workspace_are_abi_stubs
+
+next_tasks:
+  - revalidate_bit_exact_on_ascend310p1
+  - run_full_tx_rx_chain_regression
+  - collect_msprof_only_after_correctness_revalidation

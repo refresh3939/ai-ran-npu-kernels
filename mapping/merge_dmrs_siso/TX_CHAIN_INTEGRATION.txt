@@ -1,0 +1,21 @@
+tx_chain 集成 merge_dmrs 算子
+================================
+
+1) tx_chain.cpp 顶部 include:
+       #include "merge_dmrs.h"      // 或相对路径 "../merge_dmrs/merge_dmrs.h"
+
+2) 把现有 no-op 桩:
+       void merge_dmrs(TxArena& a, int slot){ ... // TODO ... no-op 占位 }
+   替换成:
+       void merge_dmrs(TxArena& a, int slot){
+           (void)slot;   // 序列已按本 slot c_init 在 a.dmrs_re/im(dmrs_gen 刚产出, line~240 已 sync)
+           airan::merge_dmrs_insert(a.gu_re, a.gu_im, a.dmrs_re, a.dmrs_im);
+       }
+
+3) tx_chain 的 CMakeLists / 源列表加入 merge_dmrs.cpp, include 路径加 merge_dmrs/ 目录。
+   (merge_dmrs.cpp 只依赖 acl, 无 Ascend kernel)
+
+前提确认(若不符改 merge_dmrs.h 顶部常量):
+  - a.gu_re/a.gu_im   : uint8_t* device, fp16 [14, N_SC_PAD=1664]
+  - a.dmrs_re/a.dmrs_im: uint8_t* device, fp16 [2, N_DMRS_PAD=896]
+  - DMRS 物理符号 {2,11}, comb delta=0(偶数 SC)

@@ -1,0 +1,108 @@
+schema_version: 1
+
+id: T9_MIMO_RESOURCE_GRID_MAP
+name: mimo_resource_grid_map
+aliases: [pusch_mimo_resource_grid_map, mimo_layer_dmrs_map]
+category: mapping
+domain: mimo
+chain: tx
+physical_channel: pusch
+spatial_mode: runtime_rank
+status: implemented_device_verified
+runtime_profile_integration: loopback_wrapper_common_abi
+
+paths:
+  source: kernels/mapping/mimo_resource_grid_map
+  staging_source: kernels/tx/mimo_resource_grid_map
+  shared_types: kernels/common/pusch_mimo_types.h
+  knowledge: kernels/mapping/mimo_resource_grid_map/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  public_args: MimoResourceGridMapOpArgsV1
+  config: PuschMimoConfig
+  layout: PuschMimoLayout
+  complex_representation: separate_real_imag_fp16_planes
+  inputs:
+    - {name: layer_re, dtype: float16, shape: [L, 19200], layout: layer_data_re}
+    - {name: layer_im, dtype: float16, shape: [L, 19200], layout: layer_data_re}
+    - {name: dmrs_re, dtype: float16, shape: [L, 2, 896], layout: layer_dmrs_symbol_re}
+    - {name: dmrs_im, dtype: float16, shape: [L, 2, 896], layout: layer_dmrs_symbol_re}
+  outputs:
+    - {name: layer_grid_re, dtype: float16, shape: [L, 14, 1664], layout: layer_symbol_natural_sc}
+    - {name: layer_grid_im, dtype: float16, shape: [L, 14, 1664], layout: layer_symbol_natural_sc}
+  runtime_geometry:
+    num_layers: "config.num_layers in [1,4]"
+    num_tx_ports: "config.num_tx_ports in {1,2,4}"
+    constraint: "L <= P"
+  valid_subcarriers: "[0,1596)"
+  data_valid_length: 19152
+  data_stride: 19200
+  dmrs_valid_length_per_symbol: 798
+  dmrs_stride: 896
+  output_padding_contract: "all unmapped RE and [1596,1664) are positive zero"
+  adapter_owned_resources: [data_dst_offset, dmrs_dst_offset, workspace, tiling]
+
+mapping:
+  symbols_per_slot: 14
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+  dmrs_type: 1
+  dmrs_symbols: 2
+  configurable_dmrs_mask: true
+  dmrs_port_comb:
+    ports_1000_1001: "subcarrier=2*k"
+    ports_1002_1003: "subcarrier=2*k+1"
+  offset_unit: byte
+  invalid_offset: 0xffffffff
+  ignored_input_padding:
+    data: "[19152,19200) per layer"
+    dmrs: "[798,896) per layer and DMRS symbol"
+
+integration:
+  upstream:
+    - {operator: layer_map_mimo, tensor: "layer_re/im fp16 [L,19200]"}
+    - {operator: mimo_dmrs_gen, tensor: "dmrs_re/im fp16 [L,2,896]"}
+  downstream:
+    operator: pusch_codebook_precode
+    tensor: "layer_grid_re/im fp16 [L,14,1664]"
+  no_reorder_between_adjacent_operators: true
+  shared_runtime_fields: [num_layers, num_tx_ports, dmrs_symbol_mask, dmrs_ports]
+
+execution:
+  block_dim: L
+  scheduling: one_layer_per_aiv
+  stream_synchronize_in_wrapper: false
+  data_dma_blocks_per_plane: 3
+  dmrs_inverse_index_reuse: "per layer across D symbols and real/imag planes"
+
+commands:
+  run: bash run.sh
+  host_contract: ctest --test-dir build --output-on-failure
+
+correctness:
+  comparison: fp16_bit_exact
+  tested_ranks: [1, 2, 3, 4]
+  reordered_ports: pass
+  alternate_dmrs_mask: pass
+  poison_input_padding: pass
+  output_padding_zero: pass
+  host_contract_test: pass
+  npu_cases: 5
+
+performance:
+  device: Ascend310P3
+  benchmark: "30 samples x 100 launches, device event"
+  rank4_p50_us: 26.4
+  baseline_rank4_p50_us: 62.29
+
+known_limitations:
+  - fixed_14_symbols_133rb_1596_used_1664_padded_geometry
+  - exactly_two_dmrs_symbols_in_current_profile
+  - type1_single_symbol_dmrs_only
+  - transform_precoding_not_supported
+  - maximum_four_layers_in_tx_v1

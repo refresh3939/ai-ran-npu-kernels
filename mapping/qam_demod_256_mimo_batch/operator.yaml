@@ -1,0 +1,129 @@
+schema_version: 1
+
+id: R9_mimo_batch
+name: qam_demod_256_mimo_batch
+aliases: [qam_demod_256_batch]
+category: mapping
+domain: mapping
+chain: rx
+spatial_mode: runtime_layer_batch
+status: implemented_device_verified_native_only
+
+paths:
+  source: kernels/mapping/qam_demod_256_mimo_batch
+  derived_from: kernels/mapping/qam_demod_256_siso
+  implementation: kernels/mapping/qam_demod_256_mimo_batch/qam256_demod_batch_kernel.cpp
+  knowledge: kernels/mapping/qam_demod_256_mimo_batch/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P1
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  current_verified_soc: Ascend310P1
+
+chain_contract:
+  canonical_rx_path:
+    - mimo_detect_bri_batch_full_grid
+    - qam_demod_256_mimo_batch
+    - layer_demap_mimo
+  upstream: mimo_detect_bri_batch
+  downstream: layer_demap_mimo
+  mimo_data_extract_role: optional_noncanonical_compact_materializer
+  compact_qam_path_status: not_implemented_not_production
+
+interface:
+  public_args: QamDemod256BatchOpArgsV1
+  batch_parameter: config.num_layers
+  supported_layers: [1, 2, 3, 4]
+  inputs:
+    - {name: x_re, dtype: float16, shape: [L, 14, 1664], layout: layer_symbol_subcarrier}
+    - {name: x_im, dtype: float16, shape: [L, 14, 1664], layout: layer_symbol_subcarrier}
+    - {name: no_eff, dtype: float16, shape: [L, 14, 1664], layout: layer_symbol_subcarrier}
+  outputs:
+    - name: layer_llr
+      dtype: int16
+      fixed_point: Q11.5
+      shape: [L, 8, 12, 1600]
+      layout: layer_stream_data_symbol_subcarrier
+      valid_subcarriers_per_symbol: 1596
+      stream_order: [I_c0, I_c1, I_c2, I_c3, Q_c0, Q_c1, Q_c2, Q_c3]
+      physical_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+      polarity: positive_means_bit_0
+  rejected_input_layouts:
+    - {producer: mimo_data_extract, shape: [L, 19200], reason: compact_layout_is_not_this_kernel_abi}
+  adapter_owned_resources: [workspace, tiling]
+
+algorithm:
+  family: 5g_nr_256qam_soft_demapper
+  approximation: max_log
+  implementation: cancellation_safe_pairwise_hinge_formula
+  inherited_from: qam_demod_256_siso
+  quantization_scale: 32
+  llr_clip_fx: 2560
+  y_scaled_clip: 1000
+  thresholds: [2, 4, 6, 8, 10, 12, 14]
+
+geometry:
+  physical_symbols: 14
+  dmrs_symbols: [2, 11]
+  data_symbols: 12
+  subcarriers_used: 1596
+  input_subcarriers_padded: 1664
+  output_symbol_stride: 1600
+
+execution:
+  implementation_selector: none_native_only
+  kernel_launches_per_batch: 1
+  block_dim: 4
+  active_cores: 4
+  block_index_mapping: "GetBlockIdx() xor 2"
+  data_symbols_per_core: 3
+  vector_batch_elements_per_core: 4992
+  layer_scheduling: device_loop_inside_each_core
+  cross_core_sync: false
+  stream_synchronize_in_adapter: false
+  workspace_argument_present: true
+  workspace_used_by_kernel_bytes: 0
+
+commands:
+  generate: python3 scripts/gen_data.py
+  run: bash run.sh
+  host_contract: ctest --test-dir build --output-on-failure
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  comparison: int16_bit_exact
+  tested_layers: [1, 2, 3, 4]
+  output_physical_padding_exercised: true
+  current_source_validation:
+    date: 2026-09-07
+    soc: Ascend310P1
+    clean_rebuild: pass
+    host_contract: pass
+    common_type_abi_layout: pass
+    device_binary_sha256: 3a2549a35fc9300fe1c6eab54eb921405b407b600afd257948838c6e028b62ea
+    matches_pre_cleanup_rank1_through_rank4_npu_validated_binary: true
+    result: pass_by_bit_identical_device_binary
+    current_sandbox_npu_rerun: blocked_no_device_nodes_drvret_4
+  required_clean_validation:
+    - rank1_through_rank4_npu_pass
+    - qam_output_to_layer_demap_exact_pass
+    - clean_tree_check_pass
+
+performance:
+  scope: device_event_p50
+  warmup_runs: 5000
+  timed_runs: 3000
+  source_verified_ascend310p1_us:
+    rank1: 17.9
+    rank2: 39.0
+    rank3: 59.2
+    rank4: 62.1
+
+known_limitations:
+  - fixed_14_symbol_133rb_geometry
+  - fixed_dmrs_symbols_2_and_11
+  - fixed_256qam
+  - maximum_four_logical_layers
+  - output_is_symbol_padded_not_strict_compact
+  - no_no_eff_zero_nan_inf_guard

@@ -1,0 +1,71 @@
+schema_version: 1
+id: PUSCH_MIMO_RX_CHAIN
+name: pusch_mimo_rx_chain
+category: chain
+chain: rx
+spatial_mode: mimo
+status: rank1_to_rank4_staged_device_e2e_verified
+claim: nonzero_coded_23slot_e2e_pass
+
+paths:
+  source: kernels/chain/pusch_mimo_rx_chain
+  contract_matrix: kernels/chain/pusch_mimo_rx_chain/contract_matrix.json
+  shared_harness: kernels/chain/pusch_mimo_contract_harness.py
+
+profile:
+  rx_antennas: 64
+  logical_rank_contract: [1, 2, 3, 4]
+  detector_physical_layers: 16
+  slots: 23
+  symbols_per_slot: 14
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+  modulation: 256QAM
+  qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+  observation_models:
+    rank1: {ports: [1000], pilot_count: [798], status: supported_npu_verified}
+    rank2: {ports: [1000, 1002], pilot_count: [798, 798], status: supported_npu_verified}
+    rank3: {ports: [1000, 1001, 1002], pilot_count: [399, 399, 798], status: supported_npu_verified}
+    rank4: {ports: [1000, 1001, 1002, 1003], pilot_count: [399, 399, 399, 399], status: supported_npu_verified}
+  ce_to_io_pack:
+    ce_output: {dtype: fp16_split_complex, shape: [NR, 16, 14, 1664]}
+    io_pack_input: {dtype: fp16_split_complex, shape: [NR, 16, 14, 1664]}
+    active_layer_rule: "[0,L) valid; [L,16) positive zero"
+  physical_radio_profiles:
+    fd8x8_rank1_4:
+      architecture: full_digital
+      physical_rx_antennas: 8
+      rx_rf_chains: 8
+      detector_rx_capacity: 64
+      adapter: zero_pad_h_y_and_repeat_noise_8_to_detector_capacity_64
+      status: npu_23slot_rank1_to_rank4_pass
+
+execution:
+  contract_check: ./run_contracts.sh
+  readiness_check: ./run.sh
+  host_test: python3 tests/test_contract_harness.py
+  readiness_exit_code: 0
+  npu_executed: true
+  orchestrator: kernels/chain/pusch_mimo_loopback
+
+hard_blockers: []
+
+evidence:
+  ranks: [1, 2, 3, 4]
+  files:
+    - kernels/chain/pusch_mimo_loopback/evidence/rank1_23slot_e2e.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank2_23slot_e2e.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank3_23slot_e2e.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank4_23slot_e2e.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank1_23slot_e2e_fd8x8.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank2_23slot_e2e_fd8x8.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank3_23slot_e2e_fd8x8.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank4_23slot_e2e_fd8x8.json
+
+observation_policy:
+  canonical_boundary: natural_h_ls_plus_pilot_count_and_pilot_sc
+  weight_binding: [rank, pilot_count, pilot_sc_hash]
+  valid_models: [COMB2_798, FD_OCC2_399]
+  valid_rank3_mixed: [399, 399, 798]
+  valid_rank4: [399, 399, 399, 399]
+  silent_399_to_798_expand_or_truncate_forbidden: true

@@ -1,0 +1,88 @@
+schema_version: 1
+
+id: R6_batch
+name: re_demap_batch
+aliases: [re_demap_batched]
+category: mapping
+domain: mapping
+chain: rx
+spatial_mode: runtime_rx_antenna_batch
+status: implemented_device_verified_clean
+
+paths:
+  source: kernels/mapping/re_demap_batch
+  derived_from: kernels/mapping/re_demap_siso
+  knowledge: kernels/mapping/re_demap_batch/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P1
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  public_args: ReDemapBatchOpArgsV1
+  batch_parameter: config.num_rx_antennas
+  supported_rx_antennas: [1, 64]
+  default_batch: 8
+  inputs:
+    - {name: fft_grid_re, dtype: float16, shape: [NR, 14, 32, 64], layout: antenna_symbol_stage4}
+    - {name: fft_grid_im, dtype: float16, shape: [NR, 14, 32, 64], layout: antenna_symbol_stage4}
+  outputs:
+    - {name: rx_grid_re, dtype: float16, shape: [NR, 14, 1664], layout: antenna_symbol_natural_sc}
+    - {name: rx_grid_im, dtype: float16, shape: [NR, 14, 1664], layout: antenna_symbol_natural_sc}
+  valid_subcarriers: "[0,1596)"
+  padding_contract: "[1596,1664) is explicit positive zero"
+  adapter_owned_resources: [gather_index, workspace, tiling]
+
+algorithm:
+  family: resource_element_demapping
+  implementation: persistent_runtime_batch_gather
+  fft_size: 2048
+  symbols_per_slot: 14
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+  upstream_layout: raw_stage4_32x64
+  output_layout: fftshift_natural_used_subcarriers
+  padding_fix: explicit_duplicate_zero_after_gather
+
+execution:
+  block_dim: 4
+  symbols_per_tile: 4
+  tiles_per_antenna: 4
+  scheduling: persistent_tile_stride_block_dim
+  kernel_launches_per_batch: 1
+  index_loaded_once_per_core: true
+  inter_core_sync: none
+
+commands:
+  generate: RE_DEMAP_BATCH_SIZE=8 python3 scripts/re_demap_batch_ref.py
+  run: bash run.sh -r npu -v Ascend310P1 -b 8
+  run_64rx: bash run.sh -r npu -v Ascend310P1 -b 64
+  verify: RE_DEMAP_BATCH_SIZE=8 python3 scripts/verify_result.py
+
+correctness:
+  valid_region_comparison: fp16_bit_exact
+  padding_comparison: positive_zero_bit_pattern
+  expected_success: "PASS (NR*14/NR*14)"
+  current_clean_validation:
+    date: 2026-09-06
+    soc: Ascend310P1
+    tested_rx_antennas: [3, 64]
+    nr3_result: pass_42_of_42
+    nr64_result: pass_896_of_896
+    padding_nonzero_words: 0
+  host_contract_test: pass
+
+performance:
+  scope: host_launch_plus_stream_synchronize
+  warmup_runs: 10
+  timed_runs: 50
+  current_clean_ascend310p1:
+    nr3_p50_us: 50.8
+    nr64_p50_us: 674.5
+    nr64_amortized_p50_us_per_antenna: 10.5
+
+known_limitations:
+  - fixed_fft2048_14_symbols_133rb_geometry
+  - fixed_centered_1596_subcarriers_without_dc_null
+  - maximum_64_rx_antennas

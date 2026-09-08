@@ -1,0 +1,19 @@
+schema_version: 1
+name: bri_grouped_rhs_adapter
+kind: chain_abi_adapter
+abi_version: 1
+group_size: 8
+input:
+  dtype: fp16
+  shape: [23296, NR, 16]
+  supported_nr: [16, 32, 64]
+  layout: canonical_re_rx_repeated_layer
+output:
+  dtype: fp16
+  shape: [2912, NR, 16]
+  layout: group8_rx_rhs_column
+mapping: out[re_div_8,rx,re_mod_8] = in[re,rx,0]
+tail_columns: positive_zero
+device_consumer: mimo_detect_bri_batch
+readiness: required_until_categorized_bri_abi_is_reconciled
+canonical_index_contract: kernels/common/bri_grouped_rhs_adapter.h

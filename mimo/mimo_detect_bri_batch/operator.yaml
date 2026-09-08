@@ -1,0 +1,308 @@
+schema_version: 1
+
+id: R13
+name: mimo_detect_bri_batch
+aliases: [mimo_detect]
+implementation_name: mimo_detect_bri_sparse_final
+category: mimo
+chain: rx
+chain_position: after_matrix_channel_estimation_before_per_layer_qam_demodulation
+status: implemented_device_verified_clean_final
+knowledge_status: current_source_checked_conversation_archived
+
+paths:
+  source: kernels/mimo/mimo_detect_bri_batch
+  canonical_algorithm_source: /home/refresh/AI-RAN-NPU/kernels/rx/mimo_detect_bri_batch
+  optimization_source: /home/refresh/AI-RAN-NPU/kernels/rx/mimo_detect_bri_re_multibuf
+  knowledge: kernels/mimo/mimo_detect_bri_batch/KNOWLEDGE.md
+  conversation: conversations/R13_mimo_detect.md
+  conversations:
+    - conversations/R13_mimo_detect.md
+    - conversations/R13_mimo_detect_v2.md
+
+target:
+  architecture: dav_m200
+  default_soc: Ascend310P1
+  supported_soc:
+    - Ascend310P1
+    - Ascend310P3
+  cann_version: "8.0.0"
+  cann_component_version: "7.6.0.1.220"
+  cann_path: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  batch: one_5g_grid_per_host_invocation
+  symbols: 14
+  padded_subcarriers_default: 1664
+  used_subcarriers_per_symbol: 1596
+  n_re_default: 23296
+  physical_layers: 16
+  logical_layers_parameter: NL_REAL
+  complex_storage: separate_real_imaginary
+  input_dtype: fp16
+  cube_accumulator_dtype: fp32
+  vector_unbias_dtype: fp32
+  output_dtype: fp16
+  inputs:
+    - name: h_re
+      file: hrm_re.bin
+      shape: [N_RE, NR, 16]
+      dtype: fp16
+    - name: h_im
+      file: hrm_im.bin
+      shape: [N_RE, NR, 16]
+      dtype: fp16
+    - name: no
+      file: no.bin
+      shape: [N_RE]
+      dtype: fp16
+    - name: yv_re
+      file: yvpad_re.bin
+      shape: [N_RE, NR, 16]
+      dtype: fp16
+      semantics: received_vector_repeated_in_all_16_rhs_columns
+    - name: yv_im
+      file: yvpad_im.bin
+      shape: [N_RE, NR, 16]
+      dtype: fp16
+      semantics: received_vector_repeated_in_all_16_rhs_columns
+    - name: y_re_y_im_workspace_tiling
+      semantics: legacy_abi_placeholders
+  outputs:
+    - name: xhat_re
+      shape: [16, N_RE]
+      dtype: fp16
+      layout: layer_major_re_minor
+    - name: xhat_im
+      shape: [16, N_RE]
+      dtype: fp16
+      layout: layer_major_re_minor
+    - name: no_eff
+      shape: [16, N_RE]
+      dtype: fp16
+      layout: layer_major_re_minor
+  packing:
+    parameter: PACK
+    supported: false
+    required_value: 0
+    reason: sparse_match_detect_final_path_is_validated_only_for_one_re_per_unit
+  internal_rhs_adapter:
+    source: kernels/common/bri_grouped_rhs_adapter.h
+    public_input: repeated_y_[N_RE,NR,16]
+    kernel_input: grouped_y_[N_RE_div_8,NR,16]
+    group_size: 8
+    placement: after_public_ABI_validation_before_device_upload
+
+algorithm:
+  family: unbiased_lmmse_with_block_richardson_inverse
+  noise_model: white_sigma_squared_identity
+  gram: "A = H^H H + sigma2 I"
+  matched_filter: "m = H^H y"
+  preconditioner: block_diagonal_of_A
+  block_inverse: diagonal_scaled_neumann
+  neumann_iterations: 3
+  neumann_terms: 4
+  neumann_initialization: "S = I + E; then form I + E + E^2 + E^3 without E*I Cube"
+  richardson_iterations: 5
+  richardson_rewrite: "C=I-M^-1 A; X <- M^-1 + C X"
+  estimate: "xhat = (X m) / d"
+  gain: "d = max(1 - sigma2*real(diag(X)), 1e-3)"
+  effective_noise: "no_eff = (1-d)/d"
+  core_parameters:
+    nr_default: 64
+    physical_nl: 16
+    nl_real_default: 16
+    block_size_default: 8
+    group_batch_fixed: 8
+    installed_chain_variants:
+      - {name: rx16_layer16_rank4, nr: 16, nl_real: 4, block_size: 2, pack: 0}
+      - {name: rx64_layer16_rank1_4, nr: 64, nl_real: 1_to_4, block_size: 8, pack: 0}
+    re_batch_default: 64
+    re_window_default: 5824
+    l1_ring_depth_fixed: 2
+    block_dim_fixed: 4
+  convergence_checks:
+    - "2*BRI_B >= NL_REAL"
+    - "NR >= 8*min(BRI_B, NL_REAL)"
+
+execution:
+  block_dim: 4
+  core_type: AIC_with_cube_and_vector
+  group_batch: 8
+  re_batch_default: 64
+  re_batch_supported: [16, 32, 64]
+  re_window_default: 5824
+  re_window_semantics: one_contiguous_full_core_window_with_64_re_output_staging
+  l1_ring_depth: 2
+  task_mapping: contiguous_units_per_core
+  experimental_mode_switches: removed
+  intermediate_dump_paths: removed
+  compile_time_dimensions:
+    - NR
+    - physical_NL
+    - NL_REAL
+    - BRI_B
+    - PACK
+    - N_SC_PAD
+    - RE_BATCH
+    - RE_WINDOW
+  static_constraints:
+    - "NR % 16 == 0"
+    - "physical_NL == 16"
+    - "N_UNIT/4 is divisible by RE_BATCH"
+    - "NR <= 96 for the fixed GB=8 L0A layout"
+    - "L0A/L0B/L0C capacity assertions pass"
+  host_timing:
+    warmup_runs_default: 3
+    timed_runs_default: 20
+    statistic: p50
+    scope: kernel_launch_plus_aclrtSynchronizeStream
+
+commands:
+  generate: >-
+    NR=64 NL=16 NL_REAL=16 BRI_B=8 PACK=0 AIRAN_SCPAD=1664
+    AIRAN_DATA_DIR="$PWD/data" PYTHONDONTWRITEBYTECODE=1
+    python3 scripts/mimo_detect_bri_ref.py
+  run: >-
+    bash run.sh -r npu -v Ascend310P1
+  quick_run: >-
+    NR=16 NL_REAL=4 BRI_B=2 AIRAN_WARMUP=0 AIRAN_TIMED=1 bash run.sh
+  verify: >-
+    NR=64 NL=16 NL_REAL=16 PACK=0 AIRAN_SCPAD=1664
+    PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_result.py
+
+correctness:
+  golden: numpy_float64_exact_lmmse
+  algorithm_precheck: numpy_float64_bri_vs_exact_lmmse
+  reference_seed: 20260531
+  default_snr_db: 20.0
+  xhat_metric: normalized_rms_evm_vs_exact_lmmse_output
+  xhat_threshold: 0.05
+  no_eff_metric: median_relative_error_with_1e-3_denominator_floor
+  no_eff_threshold: 0.10
+  valid_region: first_NL_REAL_layers
+  bit_exact_required_against_optimized_source: true
+  current_clean_validation:
+    date: 2026-09-03
+    soc: Ascend310P1
+    shape: [14, 1664, 64, 16]
+    evm: 0.0176
+    no_eff_relative_median: 0.00141
+    result: pass
+    optimized_source_outputs_cmp: identical
+    output_sha256:
+      xhat_re: 901f818bc39b53eec76cbc7f2d725615472b06a4692648b0024eecb47a5b30e0
+      xhat_im: 4f37c143cfa16523d741ab691ecb8093739632790228e1e40867597ff5700cdd
+      no_eff: 5dd47b0418d6687ef6a0e9b69d6f99101c00692acf33830a3cfd7b1df164b5c4
+  loopback_rank4_nr16:
+    date: 2026-09-08
+    shape: [14, 1664, 16, 16]
+    active_layers: 4
+    bri_block: 2
+    status: actual_npu_pass
+  standalone_variants_20260908:
+    - nr: 16
+      active_layers: 4
+      bri_block: 2
+      xhat_evm: 0.0197
+      no_eff_relative_median: 0.00156
+      result: actual_npu_pass
+    - nr: 64
+      active_layers: 3
+      bri_block: 8
+      xhat_evm: 0.0006
+      no_eff_relative_median: 0.00010
+      result: actual_npu_pass
+
+performance:
+  status: clean_full_grid_device_verified_20_samples
+  current_clean_full_grid:
+    n_re: 23296
+    nr: 64
+    nl_real: 16
+    warmup: 3
+    timed: 20
+    p50_ms: 8.981
+    min_ms: 8.874
+    average_ms: 8.984
+    p99_ms: 9.070
+    max_ms: 9.086
+    benchmark_grade: true
+  current_clean_quick_run:
+    n_sc_pad: 128
+    warmup: 0
+    timed: 1
+    latest_single_run_ms: 1.021
+    observed_single_run_ms: [1.021, 1.024, 1.124]
+    benchmark_grade: false
+  historical_pre_sparse_full_grid_source:
+    n_re: 23296
+    nr: 64
+    nl_real: 16
+    warmup: 3
+    timed: 100
+    p50_ms: 10.295
+    repeat_p50_ms: [10.424, 10.312]
+    evm: 0.0177
+    no_eff_relative_median: 0.00141
+    status: historical_not_rebenchmarked_after_branch_removal
+  historical_baseline_p50_ms: 19.491
+  speedup_vs_historical_baseline: 1.89
+  historical_msprof:
+    kernel_ms: 10.068
+    vector_ms: 3.223
+    mac_ms: 3.071
+    scalar_ms: 2.442
+    mte1_ms: 1.285
+    mte2_ms: 0.507
+    mte3_ms: 1.054
+    cube_utilization: 0.399
+    artifacts_migrated: false
+  meets_500us_slot_budget: false
+
+rejected_equivalent_optimizations:
+  - vector_detect
+  - per_re_cube_detect
+  - four_re_detect_subgroups
+  - four_re_frontend_fusion
+  - core_task_swizzle
+  - l1_ring_depth_three_or_four
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - data/golden/**/*.bin
+  - data/ascend_output/**/*.bin
+  - scripts/__pycache__/**
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+  - "*.bak"
+
+known_limitations:
+  - physical_nl_fixed_to_16
+  - pack_fixed_to_zero_in_sparse_final_path
+  - fixed_schedule_gb8_l1_ring2_blockdim4_rebatch64_rewindow5824
+  - fixed_neumann3_and_richardson5
+  - nr_above_96_exceeds_current_gb8_l0a_layout
+  - white_noise_only_no_colored_interference_whitening
+  - no_channel_estimation_error_covariance
+  - yvpad_repeats_each_received_vector_across_16_rhs_columns
+  - mask_and_legacy_abi_arguments_unused_by_kernel
+  - fixed_seed_default_reference_coverage
+  - no_end_to_end_llr_bler_validation
+  - historical_latency_far_above_500us_slot_budget
+
+next_tasks:
+  - rebenchmark_full_14x1664_clean_final_with_100_samples_and_source_hash
+  - collect_clean_final_msprof_csv_with_unified_timing_scope
+  - add_standalone_resolved_plan_to_cmake_option_adapter
+  - define_compact_production_input_abi_and_upstream_channel_estimator_layout
+  - add_multi_seed_low_snr_per_re_noise_near_singular_and_estimation_error_cases
+  - validate_current_output_against_sionna_receiver_and_end_to_end_llr_bler
+  - investigate_true_batched_16x16_cube_without_changing_neumann_or_richardson_counts

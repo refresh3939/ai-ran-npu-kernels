@@ -1,0 +1,66 @@
+schema_version: 1
+
+id: T10_batch
+name: re_map_batch
+aliases: [re_map_batched]
+category: mapping
+domain: mapping
+chain: tx
+spatial_mode: runtime_tx_port_batch
+status: implemented_device_verified_clean
+
+paths:
+  source: kernels/mapping/re_map_batch
+  derived_from: kernels/mapping/re_map_siso
+  knowledge: kernels/mapping/re_map_batch/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  public_args: ReMapBatchOpArgsV1
+  batch_parameter: config.num_tx_ports
+  supported_tx_ports: [1, 2, 4]
+  inputs:
+    - {name: port_grid_re, dtype: float16, shape: [P, 14, 1664], layout: port_symbol_natural_sc}
+    - {name: port_grid_im, dtype: float16, shape: [P, 14, 1664], layout: port_symbol_natural_sc}
+  outputs:
+    - {name: fft_grid_re, dtype: float16, shape: [P, 14, 32, 64], layout: port_symbol_stage4}
+    - {name: fft_grid_im, dtype: float16, shape: [P, 14, 32, 64], layout: port_symbol_stage4}
+  valid_subcarriers: "[0,1596)"
+  input_padding_contract: "[1596,1664) is ignored"
+  output_guard_contract: "452 guard elements per symbol are positive zero"
+  adapter_owned_resources: [scatter_index, workspace, tiling]
+
+algorithm:
+  family: resource_element_mapping
+  implementation: host_batch_wrapper_over_verified_siso_inverse_gather
+  fft_size: 2048
+  symbols_per_slot: 14
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+  downstream_layout: raw_stage4_32x64
+  used_natural_bins: "[1250..2047,0..797]"
+  natural_bin_to_stage4: "64*(n%32)+floor(n/32)"
+
+execution:
+  block_dim_per_launch: 4
+  kernel_launches_per_batch: P
+  scheduling: sequential_enqueue_on_caller_stream
+  shared_index: true
+  stream_synchronize_in_wrapper: false
+
+correctness:
+  comparison: fp16_bit_exact
+  tested_tx_ports: [1, 2, 4]
+  guard_zero: pass
+  map_demap_round_trip: pass
+  scatter_table_matches_siso_sha256: 28b7fd64b8ab1076fda696054d63a432e3ab4e81a98f357d073a57661cb88df4
+  host_contract_test: pass
+
+known_limitations:
+  - fixed_fft2048_14_symbols_133rb_geometry
+  - fixed_centered_1596_subcarriers_without_dc_null
+  - first_version_uses_one_siso_launch_per_port

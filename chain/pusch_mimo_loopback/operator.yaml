@@ -1,0 +1,81 @@
+name: pusch_mimo_loopback
+version: 1.0.0
+kind: staged_device_integration
+operator_root: {default: /home/refresh/AI-RAN-NPU-clean/kernels, access: read_only}
+verified:
+  rank1:
+    slots: 23
+    tx_bits_nonzero: 599451
+    tx_bits_sha256: 7cd554a1431a4a5b572c7a5f3314e1c1cb37296c0a2b9fd8c3f67e16c2a063f9
+    matched_cell_id: 321
+    matched_info_ber: 0.0
+    wrong_cell_id: 322
+    wrong_cell_info_ber: 0.4992599729815639
+    status: npu_pass
+    evidence: evidence/rank1_23slot_e2e.json
+  rank2: {slots: 23, tx_bits_nonzero: 599451, matched_info_ber: 0.0, wrong_cell_info_ber: 0.5000264886628523, status: npu_pass, evidence: evidence/rank2_23slot_e2e.json}
+  rank3: {slots: 23, tx_bits_nonzero: 599451, matched_info_ber: 0.0, wrong_cell_info_ber: 0.49986093452002545, status: npu_pass, evidence: evidence/rank3_23slot_e2e.json}
+  rank4: {slots: 23, tx_bits_nonzero: 599451, raw_qam_ber: 0.04643401983218917, matched_info_ber: 0.0, wrong_cell_info_ber: 0.49961343107649925, status: npu_pass, evidence: evidence/rank4_23slot_e2e_fd8x8.json}
+readiness:
+  all_rank_coded_e2e: pass
+  execution_model: staged_host_orchestrator_actual_npu_kernels
+  verified_ranks: [1, 2, 3, 4]
+  required_ranks: [1, 2, 3, 4]
+radio_profiles:
+  legacy_64rx:
+    status: npu_pass
+    selection: unset_PUSCH_MIMO_RADIO_PROFILE
+  fd8x8_rank1_4:
+    configuration_source: ../../common/profiles/fd8x8_rank1_4.json
+    compiler: ../../common/mimo_profile_compiler.py
+    capability_registry: ../../common/mimo_operator_capabilities.json
+    capability_policy: require_eligible_before_launch
+    resolved_plan: work/resolved_plans/fd8x8_rank1_4_rankN.json
+    runtime_config: work/resolved_plans/fd8x8_rank1_4_rankN.bin
+    runtime_abi_bytes: 192
+    execution_variant_by_rank: {rank1_3: rx64_layer16_rank1_4, rank4: rx16_layer16_rank4}
+    requested_bucket_by_rank: {1: 8x1, 2: 8x2, 3: 8x4, 4: 8x4}
+    execution_bucket_by_rank: {rank1_3: 64x16, rank4: 16x16}
+    build_dispatch: resolve_build_variant.py
+    architecture: full_digital
+    tx_antennas: 8
+    tx_rf_chains: 8
+    rx_antennas: 8
+    rx_rf_chains: 8
+    ranks: [1, 2, 3, 4]
+    logical_tx_ports_by_rank: {1: 1, 2: 2, 3: 4, 4: 4}
+    antenna_mapping: semi_unitary_dft8
+    physical_channel: deterministic_unitary_8x8
+    default_channel_gain_by_rank: {1: 0.32, 2: 0.32, 3: 0.5, 4: 0.32}
+    default_awgn_std_int16: 80
+    detector_compatibility: zero_pad_h_y_and_repeat_noise_8rx_to_selected_capacity
+    runtime_abi_consumers:
+      - layer_map_mimo
+      - mimo_dmrs_gen
+      - mimo_resource_grid_map
+      - pusch_codebook_precode
+      - mimo_dmrs_ls
+      - channel_est_lmmse_mimo
+      - mimo_detect_io_pack
+      - mimo_detect_bri_batch_grouped_wrapper
+      - qam_demod_256_mimo_batch_wrapper
+      - layer_demap_mimo_wrapper
+    selection: PUSCH_MIMO_RADIO_PROFILE=fd8x8_rank1_4
+    status: npu_23slot_rank1_to_rank4_pass
+    evidence:
+      - evidence/rank1_23slot_e2e_fd8x8.json
+      - evidence/rank2_23slot_e2e_fd8x8.json
+      - evidence/rank3_23slot_e2e_fd8x8.json
+      - evidence/rank4_23slot_e2e_fd8x8.json
+compatibility_adapters:
+  - ../bri_grouped_rhs_adapter
+  - fd8x8_zero_pad_h_y_repeat_noise_8rx_to_selected_capacity
+fail_closed:
+  missing_file: hard_fail
+  wrong_size: hard_fail
+  all_zero_signal: hard_fail
+  qam_numeric_saturation: hard_fail
+  missing_or_zero_weight: hard_fail
+  decoder_nonzero_exit: hard_fail
+  decoder_output_bytes: 1208064
+  device_507008_or_drvRet_4: report_once_no_retry

@@ -1,0 +1,150 @@
+schema_version: 1
+
+id: R4
+name: cfo_compensate
+category: sync
+domain: sync
+chain: rx
+status: implemented
+knowledge_status: migrated_static_verified_needs_npu_revalidation
+
+paths:
+  source: kernels/sync/cfo_compensate
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/cfo_compensate
+  knowledge: kernels/sync/cfo_compensate/KNOWLEDGE.md
+  conversation: conversations/R4_cfo_compensate.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_cann_version: 8.0.0
+  cann_version_status: needs_clean_environment_capture
+
+io:
+  inputs:
+    - name: in_iq
+      dtype: int16
+      shape: [61440]
+      logical_shape: [30720, 2]
+      layout: interleaved_iq
+      quantization: Q8.8_reference_contract
+    - name: swap_idx
+      dtype: uint32
+      shape: [4096]
+      layout: byte_offsets_for_one_subtile_iq_swap
+    - name: a2
+      dtype: float16
+      shape: [61440]
+      layout: duplicated_cos_interleaved
+    - name: b2
+      dtype: float16
+      shape: [61440]
+      layout: alternating_negative_positive_sin
+  outputs:
+    - name: out_iq
+      dtype: int16
+      shape: [61440]
+      logical_shape: [30720, 2]
+      layout: interleaved_iq
+      quantization: Q8.8_reference_contract
+
+algorithm:
+  family: time_domain_cfo_derotation
+  equation: "y[n] = x[n] * exp(j * (phi0 + sign * 2*pi*cfo_hz*n/fs_hz))"
+  sign: -1
+  fs_hz: 61440000
+  samples_per_slot: 30720
+  q_scale: 256
+  implementation: device_iq_swap_plus_elementwise_complex_multiply
+  vector_path:
+    - Cast_int16_to_float16
+    - Gather_iq_swap
+    - Mul
+    - MulAddDst
+    - Cast_RINT_float16_to_int16
+  host_parameters:
+    - cfo_hz
+    - phi0_rad
+    - a2_table
+    - b2_table
+
+execution:
+  batch: 1
+  batch_unit: slot
+  block_dim: 4
+  subtile_complex_samples: 2048
+  subtile_count: 15
+  logical_aiv_subtile_assignment: [4, 3, 4, 4]
+  block_index_mapping: "GetBlockIdx() XOR 2"
+  workspace_bytes: 1048576
+  tiling_bytes: 128
+  tiling_usage: placeholder_not_read_by_kernel
+
+commands:
+  generate: python3 scripts/cfo_compensate_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  reference: scripts/cfo_compensate_ref.py
+  output_comparison: elementwise_interleaved_int16
+  tolerance_lsb: 2
+  success_pattern: "PASS"
+  migrated_validation: static_only
+  historical_current_source:
+    status: pass_not_revalidated_after_migration
+    max_error_lsb: 1
+    integrated_ber: 0
+  historical_conversation_final:
+    source_version: host_swap_plus_mul_add_dst
+    status: pass_but_stale_for_current_source
+    max_error_lsb: 1
+    samples_over_tolerance: 0
+    compared_int16_values: 61440
+
+performance:
+  status: historical_needs_clean_rebenchmark
+  measurement_scope: kernel_launch_plus_aclrtSynchronizeStream
+  warmup_runs: 10
+  timed_runs: 50
+  current_device_swap_historical:
+    latency_us_approx: 90
+  stale_host_swap_mul_add_dst:
+    min_us: 25.6
+    avg_us: 43.2
+    p50_us: 29.1
+    p99_us: 351.2
+    max_us: 351.2
+  msprof_status: no_valid_report_in_conversation
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - data/golden/*.bin
+  - data/ascend_output/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "**/__pycache__/**"
+
+known_limitations:
+  - fixed_30720_complex_samples_per_slot
+  - fixed_61440000_hz_reference_sample_rate
+  - fixed_block_dim_4_and_subtile_2048
+  - host_must_generate_a2_b2_and_maintain_cross_slot_phi0
+  - sign_convention_needs_dedicated_positive_negative_cfo_hardware_test
+  - q8_8_real_input_scale_boundary_not_independently_characterized
+  - workspace_and_tiling_are_unused_placeholders
+  - current_device_swap_performance_not_revalidated_in_clean_tree
+  - source_comments_partly_describe_stale_host_swap_version
+
+next_tasks:
+  - revalidate_current_device_swap_source_on_Ascend310P3
+  - capture_exact_CANN_version_and_full_latency_samples
+  - validate_sign_end_to_end_for_positive_negative_and_zero_cfo
+  - formalize_host_phi0_and_a2_b2_update_api
+  - clean_stale_host_swap_comments_without_changing_algorithm
+  - assess_removing_unused_workspace_and_tiling

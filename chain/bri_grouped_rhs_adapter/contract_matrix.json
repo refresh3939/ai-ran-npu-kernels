@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "operator": "bri_grouped_rhs_adapter",
+  "group_size": 8,
+  "status": "required_compatibility_adapter",
+  "input": {"name": "canonical_yvpad", "dtype": "fp16", "shape": [23296, 64, 16], "semantic": "y[re,rx] repeated across all 16 columns"},
+  "output": {"name": "grouped_rhs", "dtype": "fp16", "shape": [2912, 64, 16], "semantic": "column g stores y[group*8+g,rx] for g<8; columns 8..15 are positive zero"},
+  "mapping": "out[re/8,rx,re%8] = in[re,rx,0]",
+  "fail_closed": ["exact_size", "finite_fp16", "canonical_columns_bitwise_equal", "nonzero_payload", "tail_columns_positive_zero"],
+  "reason": "categorized BRI kernel consumes grouped RHS while its current public host contract declares canonical repeated-y yvpad",
+  "promotion_gate": "BRI public ABI and io_pack must be reconciled before removing this adapter"
+}

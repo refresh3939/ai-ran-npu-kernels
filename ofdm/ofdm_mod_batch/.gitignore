@@ -1,0 +1,9 @@
+build/
+out/
+data/
+weights/
+prof/
+prof_out/
+__pycache__/
+*.pyc
+*.bin

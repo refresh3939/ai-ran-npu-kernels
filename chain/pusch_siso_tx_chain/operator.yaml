@@ -1,0 +1,196 @@
+schema_version: 1
+
+id: SISO_TX_CHAIN
+legacy_id: TX_CHAIN
+name: pusch_siso_tx_chain
+aliases:
+  - tx_chain
+  - siso_tx_chain
+source_directory_name: pusch_siso_tx_chain
+category: chain
+chain: tx
+spatial_mode: siso
+num_tx_antennas: 1
+num_layers: 1
+num_codewords: 1
+status: implemented_paths_integrated_needs_npu_revalidation
+knowledge_status: extracted_paths_updated_needs_rebuild_and_rebenchmark
+
+paths:
+  source: kernels/chain/pusch_siso_tx_chain
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/tx_chain
+  knowledge: kernels/chain/pusch_siso_tx_chain/KNOWLEDGE.md
+  conversation: conversations/TX_CHAIN_tx_chain.md
+
+target:
+  architecture: dav_m200
+  primary_soc: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_cann_version: 8.0.0
+  clean_runtime_verified: false
+
+interface:
+  spatial_contract:
+    codeword_to_layers: one_to_one
+    layer_to_tx_antennas: one_to_one
+    per_antenna_resource_grids: false
+    output_iq_streams: 1
+  inputs:
+    - name: tx_bits
+      dtype: int8_bits_stored_as_bytes
+      shape: [143, 8448]
+      bytes: 1208064
+  outputs:
+    - name: tx_iq
+      dtype: int16_interleaved_iq
+      shape: [23, 30720, 2]
+      bytes: 2826240
+      sample_rate_hz: 61440000
+  intermediate_layouts:
+    encoded: {dtype: int8, shape: [143, 25344]}
+    rate_matched: {dtype: int16, shape: [23, 8, 19200]}
+    scrambled:
+      dtype: int16
+      shape: [23, 8, 12, 1600]
+      layout: grouped_iq_symbol_padded
+      valid_subcarriers_per_symbol: 1596
+      padding_subcarriers_per_symbol: 4
+    used_grid_planes: {dtype: fp16, shape: [14, 1664]}
+    dmrs_planes: {dtype: fp16, shape: [2, 896]}
+    fft_grid_planes: {dtype: fp16, shape: [14, 2048]}
+
+algorithm:
+  family: 5g_nr_pusch_siso_tx
+  baseline: siso_only
+  excluded_mimo_stages:
+    - layer_mapper
+    - mimo_dmrs
+    - multi_antenna_precoding
+    - per_antenna_resource_grid
+  stages_per_tb:
+    - ldpc_encode
+    - rate_match
+    - scramble
+  stages_per_slot:
+    - qam256_mod
+    - dmrs_gen
+    - host_merge_dmrs
+    - re_map
+    - ofdm_mod
+  ldpc:
+    base_graph: BG1
+    lifting_size: 384
+    code_blocks: 143
+    information_bits_per_cb: 8448
+    encoded_bits_per_cb: 25344
+  modulation: 256QAM
+  subcarrier_spacing_hz: 30000
+  fft_size: 2048
+  symbols_per_slot: 14
+  slots_per_tb: 23
+  used_subcarriers: 1596
+  used_subcarriers_padded: 1664
+  dmrs:
+    symbols: [2, 11]
+    comb: 2
+    comb_delta: 0
+    pilots_per_symbol: 798
+  scrambling:
+    n_rnti: 12345
+    q: 0
+    n_id_source: cell_id
+    input_stream_order: linear_modulation_bit_0_through_7
+    output_qam_stream_to_linear_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+    gold_extent: valid_23_by_19152_by_8_excluding_storage_padding
+    output_symbol_padding: four_zeros_after_each_1596_valid_bits
+
+execution:
+  batch:
+    parameterization: compile_time
+    code_blocks: 143
+    slots: 23
+  block_dim: 4
+  stream_count: 1
+  workspace_min_bytes: 16777216
+  generator_commands:
+    - "Generate each child operator's weights/golden with its reviewed Python reference script"
+    - "bash gen_tiling_shims.sh"
+  build_command: "bash run.sh"
+  run_command: "TX_PROFILE=0 bash run.sh"
+  benchmark_command: "TX_PROFILE=1 bash run.sh"
+  current_clean_availability: blocked_by_original_sibling_layout_and_missing_generated_weights
+
+correctness:
+  status: historical_needs_clean_revalidation
+  standard: full_coded_tx_rx_loopback
+  criteria:
+    - matched_cell_id_information_bit_ber_equals_zero
+    - mismatched_cell_id_information_bit_ber_approximately_half
+    - all_143_code_blocks_covered
+  historical_results:
+    - {tx_cell_id: 1, rx_cell_id: 1, errors: 0, bits: 1208064, status: HISTORICAL}
+    - {tx_cell_id: 128, rx_cell_id: 128, errors: 0, bits: 1208064, status: HISTORICAL}
+    - {tx_cell_id: 128, rx_cell_id: 1, errors: 602784, bits: 1208064, ber: 0.4990, status: HISTORICAL}
+  verify_command: "Run the siso_tx_chain baseline (tx_chain binary), then run the reviewed rx_chain coded-loopback entry with matching and deliberately mismatching cell_id"
+
+performance:
+  status: historical_needs_revalidation
+  environment:
+    soc: Ascend310P3
+    block_dim: 4
+    method: sustained_8x20_after_warmup
+  kernel_min_us:
+    ldpc_encode_per_tb: 1958.0
+    rate_match_per_tb: 149.2
+    scramble_per_tb: 195.2
+    qam256_mod_per_slot: 18.6
+    dmrs_gen_per_slot: 12.2
+    re_map_per_slot: 15.2
+    ofdm_mod_per_slot: 91.0
+    tx_tb_sum: 2302.4
+    tx_slot_sum: 137.0
+  historical_wall_time:
+    tx_tb_ms: 33.921
+    tx_slot_mean_ms: 0.414
+    tx_slot_max_ms: 0.437
+    tb_total_ms: 43.440
+  msprof_status: not_recorded_for_current_siso_tx_chain
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/*.bin
+  - data/tx_iq.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "*.o"
+  - "*.so"
+  - "*.a"
+  - "*.zip"
+  - "**/__pycache__/**"
+
+known_limitations:
+  - clean_category_layout_is_not_compatible_with_original_tx_sibling_paths
+  - gen_tiling_shims_hardcodes_original_tx_root
+  - generated_weights_and_golden_vectors_are_not_migrated
+  - fixed_BG1_Z384_143CB_23slot_256QAM_configuration
+  - host_gold_generation_inflates_per_tb_wall_time
+  - host_dmrs_merge_adds_sync_and_copy_overhead
+  - siso_only
+  - one_tx_antenna_one_layer_one_codeword_only
+  - no_layer_mapper_mimo_dmrs_precoding_or_per_antenna_grids
+  - no_clean_rebuild_loopback_or_ota_validation
+  - source_contains_stale_24_slot_and_q8_8_comments
+
+next_tasks:
+  - refactor_cmake_and_tiling_paths_for_clean_category_layout
+  - add_reproducible_child_weight_generation
+  - rebuild_and_run_matched_mismatched_cell_id_loopback_in_clean_tree
+  - cache_or_offload_gold_generation
+  - move_dmrs_merge_to_device
+  - correct_stale_source_comments_and_profile_label
+  - collect_msprof_with_raw_reports

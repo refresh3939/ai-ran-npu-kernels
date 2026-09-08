@@ -1,0 +1,124 @@
+schema_version: 1
+
+id: T05M
+name: rate_match_mimo
+variant: mimo_slot_batch
+category: fec
+domain: fec
+chain: tx
+stage: ldpc_rate_matching_before_scrambling
+status: implemented_and_ascend310p1_verified
+
+paths:
+  source: kernels/fec/rate_match_mimo
+  clean_migration_target: kernels/fec/rate_match_mimo
+  shared_abi: kernels/common/pusch_mimo_types.h
+  readme: kernels/fec/rate_match_mimo/README.md
+  knowledge: kernels/fec/rate_match_mimo/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P1
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  block_dim: 4
+
+io:
+  input:
+    name: code_blocks
+    dtype: int8
+    values: [0, 1]
+    shape: [143, 25344]
+    producer: ldpc_encode
+    layout: native_punctured_code_blocks
+    punctured_2z_prefix_present: false
+  output:
+    name: bits_nr
+    dtype: int16
+    values: [0, 1]
+    shape: [num_slots, 8, num_layers_times_19200]
+    stream_order: canonical_nr_bit_0_through_7
+    consumer: scramble_mimo
+  valid_symbols_per_stream_per_slot: num_layers_times_19152
+  storage_tail_per_stream_per_slot: num_layers_times_48
+  storage_tail_value: 0
+  storage_tail_consumes_codeword_bits: false
+
+fec_profile:
+  standard: 3GPP_TS_38_212_5_4_2
+  codewords: 1
+  base_graph: 1
+  lifting_size: 384
+  code_blocks: 143
+  encoded_stride: 25344
+  mother_code_length: 26112
+  redundancy_version: 0
+  filler_bits: 0
+  lbrm: false
+  repetition: supported
+  descriptor:
+    dtype: uint32
+    shape: [143, 4]
+    fields: [E, k0, Ncb, cw_bit_offset]
+    ownership: runtime_adapter_private
+
+geometry:
+  supported_rank: [1, 2, 3, 4]
+  max_slots: 23
+  qm: 8
+  data_re_per_layer_per_slot: 19152
+  padded_re_per_layer_per_slot: 19200
+  g_per_slot: 8_times_num_layers_times_19152
+
+execution:
+  form: native_single_launch_slot_batch
+  partition_axis: canonical_nr_bit_plane
+  streams_per_aiv: 2
+  output_read_modify_write: false
+  host_output_preclear_required: false
+  input_tile_elements: 4096
+  tiling_bytes: 128
+  workspace_bytes: 128
+  build_and_verify: bash run.sh -r npu -v Ascend310P1
+  clean_tree_build: true
+
+contracts:
+  upstream:
+    operator: ldpc_encode
+    exact_dtype_shape: int8_[143,25344]
+    no_host_repack: true
+  downstream:
+    operator: scramble_mimo
+    exact_dtype_shape: int16_[num_slots,8,num_layers_times_19200]
+    layout_type: common/PuschMimoLayout
+    tail_policy: zero_and_excluded_from_gold_progression
+
+correctness:
+  python_reference: scripts/gen_data.py
+  cpp_host_reference: ReferenceRateMatch
+  host_contract_test: tests/host_contract_test.cpp
+  npu_verifier: scripts/verify_result.py
+  tolerance: 0
+  coverage:
+    - rank_1_through_4
+    - max_23_slot_batch_for_every_rank
+    - siso_descriptor_table_equivalence
+    - circular_buffer_repetition
+    - canonical_nr_stream_order
+    - zero_storage_tail
+  current_host_status: pass
+  current_npu_status: ascend310p1_rank1_through_4_max_batch_bit_exact_pass
+  current_npu_date: 2026-09-07
+  current_npu_slots_per_rank: 23
+  current_npu_mismatches: 0
+  current_npu_smoke_p50_us:
+    rank1: 147.9
+    rank2: 261.6
+    rank3: 465.9
+    rank4: 562.0
+
+known_limitations:
+  - fixed_bg1_z384_c143_profile
+  - rv0_only
+  - no_filler_or_lbrm
+  - fixed_qm8_133rb_12_data_symbol_geometry
+  - device_descriptor_content_trusted_after_host_validation

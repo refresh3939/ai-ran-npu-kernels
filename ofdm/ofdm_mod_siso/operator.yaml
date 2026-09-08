@@ -1,0 +1,270 @@
+schema_version: 1
+
+id: T14
+name: ofdm_mod_siso
+aliases: [ofdm_mod]
+category: ofdm
+domain: ofdm
+chain: tx
+spatial_mode: siso
+status: implemented_optimized_npu_verified
+knowledge_status: current_source_audited_and_profiled
+
+paths:
+  source: kernels/ofdm/ofdm_mod_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/ofdm_mod
+  verified_optimization_source: /home/refresh/AI-RAN-NPU/kernels/tx/ofdm_mod_mimo_opt
+  knowledge: kernels/ofdm/ofdm_mod_siso/KNOWLEDGE.md
+  conversation: conversations/T14_ofdm_mod.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  default_soc_version: Ascend310P1
+  cann_package_path: /usr/local/Ascend/ascend-toolkit/latest
+  cann_version: 8.0.0
+
+interface:
+  inputs:
+    - name: input_re
+      dtype: float16
+      shape: [14, 32, 64]
+      physical_shape: [28672]
+      layout: s4_mixed_radix_flat_b1_times_64_plus_b2
+    - name: input_im
+      dtype: float16
+      shape: [14, 32, 64]
+      physical_shape: [28672]
+      layout: s4_mixed_radix_flat_b1_times_64_plus_b2
+  outputs:
+    - name: output_re
+      dtype: int16
+      shape: [30720]
+      layout: natural_time_with_cp
+      scale: 1600.0
+    - name: output_im
+      dtype: int16
+      shape: [30720]
+      layout: natural_time_with_cp
+      scale: 1600.0
+    - name: output_iq
+      dtype: int16
+      shape: [30720, 2]
+      physical_shape: [61440]
+      layout: interleaved_iq_natural_time_with_cp
+      scale: 1600.0
+  input_bin_mapping: "natural_bin_k = b1 + 32*b2"
+  output_contract: unitary_time_domain_times_air_scale_then_rint_int16_with_cp
+
+algorithm:
+  family: 5g_nr_cp_ofdm_modulation
+  implementation: reverse_mixed_radix_32x64_low_level_mmad
+  fft_size: 2048
+  symbols_per_slot: 14
+  samples_per_slot: 30720
+  cyclic_prefix_lengths:
+    first: 176
+    other: 144
+  radix_p: 32
+  radix_q: 64
+  stages:
+    - idft64_unitary
+    - inverse_twiddle
+    - idft32_unitary
+    - air_scale_rint_int16
+    - cyclic_prefix_insert
+    - iq_interleave
+  weight_normalization:
+    idft64: 0.125
+    idft32: 0.1767766952966369
+    total: 0.02209708691207961
+    convention: unitary_1_over_sqrt_n
+  air_scale: 1600.0
+  complex_matmul_lowering: four_real_mmad_with_fused_accumulation
+  phase_a:
+    m_full_core: 128
+    m_tail_core: 64
+    k: 64
+    n: 64
+  phase_c:
+    m: 32
+    k: 32
+    n: 64
+    rhs_tile_n: 16
+    rhs_transfer_reuse: one_gm_l1_l0b_load_serves_real_and_imag_mmad
+    l0c_accumulators: 2
+    symbol_retirement_barrier: PIPE_ALL
+  n_sub: 16
+  n_splits: 4
+
+execution:
+  batch_parameter: compile_time_single_slot
+  batch_slots: 1
+  block_dim: 4
+  symbols_per_core_capacity: 4
+  symbol_assignment: contiguous_4_4_4_2
+  phase_a_symbol_batching: m_dimension_4_4_4_2
+  scratch_bytes_per_core: 32768
+  scratch_layout: two_float16_planes_each_4_by_2048
+  warmup_runs: 10
+  timed_runs: 50
+  tiling_mode: placeholder_generated_but_not_consumed_by_kernel
+  workspace_consumed_by_kernel: false
+  resident_weights:
+    l0a_w32_bytes: 6144
+    l0b_w64_bytes: 24576
+  static_memory_bytes:
+    ub: 135168
+    l1: 79872
+    l0a: 38912
+    l0b: 40960
+    l0c: 16384
+
+commands:
+  generate: python3 scripts/ofdm_mod_ref.py
+  run_ascend310p3: bash run.sh -r npu -v Ascend310P3
+  run_ascend310p1: bash run.sh -r npu -v Ascend310P1
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  reference: data/golden/output_re.bin_and_output_im.bin
+  comparison: dequantized_per_symbol_and_full_slot_max_abs_error_plus_bit_exact_iq_interleave
+  dequant_scale: 1600.0
+  absolute_tolerance: 0.05
+  required_symbols_passed: 14
+  cyclic_prefix_required: true
+  iq_interleave_required: true
+  success_pattern: "[verify] ========== PASS (14/14, CP OK, IQ OK) =========="
+  clean_migration_status: source_cmp_to_verified_experiment
+  current_ascend310p1:
+    status: pass
+    symbols_passed: 14
+    body_max_abs_error: 0.0019
+    full_slot_max_abs_error: 0.0019
+    error_to_signal_rms_percent: 0.21
+    iq_mismatches: 0
+    output_cmp_original:
+      output_re: bit_identical
+      output_im: one_of_30720_samples_differs_by_one_lsb
+      output_iq: corresponding_one_sample_differs_by_one_lsb
+    repeated_full_runs_passed: 3
+  historical_final_unitary:
+    status: pass
+    symbols_passed: 14
+    body_max_abs_error: 0.0019
+    full_slot_max_abs_error: 0.0019
+    error_to_signal_rms_percent: 0.21
+    iq_mismatches: 0
+  python_self_checks:
+    unitary_ifft_vs_numpy: required
+    four_real_vs_complex: required
+    unitary_roundtrip: required
+    sionna: optional_backend_dependent
+
+performance:
+  status: verified_ascend310p1_cann_8_0_0
+  metric_scope: kernel_launch_plus_stream_sync_excluding_transfers_generation_build_and_scratch_memset
+  msprof_status: collected_pipe_utilization
+  sample_policy: exclude_10_warmup_then_median_50_timed_launches
+  historical_v1_host_postprocess:
+    min_us: 133.1
+    avg_us: 137.5
+    p50_us: 137.4
+    p99_us: 146.0
+    correctness: pass_14_of_14_cp_ok
+    source_status: stale
+  historical_v2_full_npu_pre_final_unitary:
+    min_us: 140.8
+    avg_us: 144.9
+    p50_us: 143.6
+    p99_us: 165.0
+    correctness: pass_14_of_14_cp_ok
+  baseline_msprof_median_us:
+    task: 81.612
+    aicore: 71.890
+    vector: 11.345
+    scalar: 58.891
+    mte1: 5.484
+    mte2: 25.752
+    mte3: 5.510
+    mac: 2.385
+  current_msprof_median_us:
+    task: 35.806
+    aicore: 31.525
+    vector: 6.319
+    scalar: 17.616
+    mte1: 1.252
+    mte2: 9.122
+    mte3: 5.304
+    mac: 1.114
+  previous_iq_muls_msprof_median_us:
+    task: 38.723
+    aicore: 34.520
+    vector: 6.462
+    scalar: 25.290
+    mte1: 1.998
+    mte2: 13.726
+    mte3: 5.282
+    mac: 1.555
+  task_improvement_percent: 56.1
+  aicore_improvement_percent: 56.1
+  phase_c_rhs_reuse_improvement_vs_previous_percent:
+    task: 7.5
+    aicore: 8.7
+    mte1: 37.3
+    mte2: 33.5
+  retained_optimizations:
+    - phase_a_batch_symbols_along_m
+    - w64_resident_l0b
+    - w32_resident_l0a
+    - phase_c_single_n16_rhs_tile_reused_by_real_and_imag_mmad
+    - phase_c_dual_l0c_accumulators
+    - phase_c_symbol_end_pipe_all_required_for_safe_storage_recycling
+    - replace_cross_core_syncall_with_mte3_mte2_event
+    - iq_pack_int32_muls_65536
+  headroom_warning: host_print_uses_1000us_but_30khz_mu1_slot_is_500us
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - weights/*.bin
+  - data/golden/*.bin
+  - data/ascend_output/*.bin
+  - data/golden/in_re.bin
+  - data/golden/in_im.bin
+  - data/golden/output_re.bin
+  - data/golden/output_im.bin
+  - data/golden/output_iq.bin
+  - data/golden/ifft_bodies.bin
+  - data/golden/stageA_idft64.bin
+  - data/golden/stageB_itwiddle.bin
+  - data/golden/stageC_idft32.bin
+  - "*.o"
+  - "*.so"
+  - "*.a"
+  - "*.zip"
+
+known_limitations:
+  - fixed_fft2048_fourteen_symbols_and_cp_pattern
+  - fixed_single_slot_batch_and_block_dim_4
+  - requires_re_map_s4_layout_contract
+  - generated_weights_inputs_and_goldens_required
+  - no_clean_real_re_map_integration_revalidation
+  - device_frequency_and_source_commit_not_pinned
+  - acl_errors_are_logged_but_not_fatal
+  - tiling_and_workspace_arguments_are_not_consumed
+  - phase_c_rhs_reuse_requires_symbol_end_pipe_all
+  - exact_cross_pipeline_dependency_for_rhs_reuse_not_yet_identified
+  - full_symbol_rhs_l0b_residency_variants_failed_correctness
+  - shiftleft_int32_compiles_but_is_noop_on_dav_m200
+
+next_tasks:
+  - pin_soc_frequency_and_source_revision_for_results
+  - validate_real_re_map_to_ofdm_mod_layout_scale_and_papr
+  - add_zero_impulse_single_tone_saturation_and_multi_seed_tests
+  - add_explicit_iq_only_abi_if_tx_chain_does_not_consume_separated_planes
+  - replace_phase_c_rhs_symbol_pipe_all_with_verified_precise_hard_events_or_queue_ownership
+  - evaluate_quantize_cp_iq_output_double_buffering
+  - make_acl_and_io_fail_fast

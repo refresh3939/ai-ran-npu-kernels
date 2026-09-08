@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "chain": "pusch_mimo_tx_chain",
+  "claim": "fused_single_context_tx_rank1_to_rank4_and_staged_coded_e2e_verified",
+  "mimo_profile_contract": {
+    "profile_name": "fd8x8_rank1_4",
+    "path": "common/profiles/fd8x8_rank1_4.json",
+    "ranks": [1, 2, 3, 4]
+  },
+  "stage_order": [
+    "ldpc_encode",
+    "rate_match_mimo",
+    "scramble_mimo",
+    "qam_mod_256_mimo",
+    "layer_map_mimo",
+    "mimo_dmrs_gen",
+    "mimo_resource_grid_map",
+    "pusch_codebook_precode_or_bypass",
+    "re_map_batch",
+    "ofdm_mod_batch"
+  ],
+  "geometry": {
+    "num_slots": 23,
+    "num_symbols": 14,
+    "num_data_symbols": 12,
+    "used_subcarriers": 1596,
+    "padded_subcarriers": 1664,
+    "data_re_per_layer": 19152,
+    "data_stride_per_layer": 19200,
+    "data_padding_per_layer": 48,
+    "qam_row_stride": 1600,
+    "qam_row_padding": 4,
+    "fft_size": 2048,
+    "dmrs_re_per_comb": 798,
+    "dmrs_stride": 896,
+    "occ_observations_per_shared_comb_layer": 399,
+    "grid_re_per_slot": 23296
+  },
+  "bit_order_maps": {
+    "qam_stream_to_nr_bit": [0,2,4,6,1,3,5,7],
+    "nr_bit_to_qam_stream": [0,4,1,5,2,6,3,7]
+  },
+  "cross_chain_dmrs_contract": {
+    "currently_composable_tx_ranks": [1,2,3,4],
+    "dmrs_ports": [1000,1001,1002,1003],
+    "rx_pilot_count_per_layer": [399,399,399,399],
+    "rx_observation_model_per_layer": ["FD_OCC2_399","FD_OCC2_399","FD_OCC2_399","FD_OCC2_399"],
+    "channel_est_lmmse_mimo_status": "supported_npu_verified"
+  },
+  "source_requirements": [
+    {"id": "shared_pusch_mimo_abi", "path": "common/pusch_mimo_types.h", "severity": "hard_fail"}
+  ],
+  "operators": [
+    {"id": "ldpc_encode", "required": true, "path_candidates": ["fec/ldpc_encode", "tx/ldpc_encode"], "required_files": ["ldpc_encode.h", "ldpc_encode_kernel.cpp"]},
+    {"id": "rate_match_mimo", "required": true, "path_candidates": ["fec/rate_match_mimo", "tx/rate_match_mimo"], "required_files": ["rate_match_mimo.h", "rate_match_mimo.cpp"]},
+    {"id": "scramble_mimo", "required": true, "path_candidates": ["fec/scramble_mimo", "tx/scramble_mimo"], "required_files": ["scramble_mimo.h", "scramble_mimo_kernel.cpp"]},
+    {"id": "qam_mod_256_mimo", "required": true, "path_candidates": ["mapping/qam_mod_256_mimo", "tx/qam_mod_256_mimo"], "required_files": ["qam_mod_256_mimo.h", "qam_mod_256_mimo.cpp"]},
+    {"id": "layer_map_mimo", "required": true, "path_candidates": ["mapping/layer_map_mimo", "tx/layer_map"], "required_files": ["layer_map.h", "layer_map.cpp"]},
+    {"id": "mimo_dmrs_gen", "required": true, "path_candidates": ["mimo/mimo_dmrs_gen", "tx/mimo_dmrs_gen"], "required_files": ["mimo_dmrs_gen.h", "mimo_dmrs_gen_kernel.cpp"]},
+    {"id": "mimo_resource_grid_map", "required": true, "path_candidates": ["mapping/mimo_resource_grid_map", "tx/mimo_resource_grid_map"], "required_files": ["mimo_resource_grid_map.h", "mimo_resource_grid_map.cpp"]},
+    {"id": "pusch_codebook_precode_or_bypass", "required": true, "path_candidates": ["mimo/pusch_codebook_precode"], "required_files": ["pusch_codebook_precode.h", "pusch_codebook_precode_runtime.cpp"]},
+    {"id": "re_map_batch", "required": true, "path_candidates": ["mapping/re_map_batch"], "required_files": ["re_map_batch.h", "re_map_batch.cpp"]},
+    {"id": "ofdm_mod_batch", "required": true, "path_candidates": ["ofdm/ofdm_mod_batch"], "required_files": ["ofdm_mod.h", "ofdm_mod_kernel.cpp"]}
+  ],
+  "edges": [
+    {
+      "id": "tx_e01_ldpc_to_rate_match",
+      "producer": "ldpc_encode", "consumer": "rate_match_mimo",
+      "producer_contract": {"dtype": "int8_bit", "shape": [143,25344], "layout": "cb_major_encoded_bits", "padding": "punctured_prefix_semantics_preserved", "bit_order": "nr_ldpc_codeword", "active_layers": "not_applicable", "port_semantics": "codeword_domain"},
+      "consumer_contract": {"dtype": "int8_bit", "shape": [143,25344], "layout": "cb_major_encoded_bits", "padding": "punctured_prefix_semantics_preserved", "bit_order": "nr_ldpc_codeword", "active_layers": "not_applicable", "port_semantics": "codeword_domain"}
+    },
+    {
+      "id": "tx_e02_rate_match_to_scramble",
+      "producer": "rate_match_mimo", "consumer": "scramble_mimo",
+      "producer_contract": {"dtype": "int16_bit_0_or_1", "shape": ["S",8,"L*19200"], "layout": "slot_stream_codeword", "padding": "tail_L*48_zero_no_gold_advance", "bit_order": "canonical_nr_b0_to_b7", "active_layers": "L=1..4", "port_semantics": "single_codeword_before_layers"},
+      "consumer_contract": {"dtype": "int16_bit_0_or_1", "shape": ["S",8,"L*19200"], "layout": "slot_stream_codeword", "padding": "tail_L*48_zero_no_gold_advance", "bit_order": "canonical_nr_b0_to_b7", "active_layers": "L=1..4", "port_semantics": "single_codeword_before_layers"}
+    },
+    {
+      "id": "tx_e03_scramble_to_qam",
+      "producer": "scramble_mimo", "consumer": "qam_mod_256_mimo",
+      "producer_contract": {"dtype": "int16_bit_0_or_1", "shape": ["S",8,"L*19200"], "layout": "slot_stream_compact_codeword", "padding": "tail_L*48_zero", "bit_order": "grouped_I0_I1_I2_I3_Q0_Q1_Q2_Q3", "active_layers": "L=1..4", "port_semantics": "single_codeword_before_layers"},
+      "consumer_contract": {"dtype": "int16_bit_0_or_1", "shape": [8,"L*19200"], "layout": "stream_compact_codeword", "padding": "tail_L*48_zero", "bit_order": "grouped_I0_I1_I2_I3_Q0_Q1_Q2_Q3", "active_layers": "L=1..4", "port_semantics": "single_codeword_before_layers"},
+      "adapter": {"operation": "zero_copy_per_slot_view", "validated": true}
+    },
+    {
+      "id": "tx_e04_qam_to_layer_map",
+      "producer": "qam_mod_256_mimo", "consumer": "layer_map_mimo",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["L*19200"], "layout": "codeword_symbol_L_interleaved", "padding": "last_L*48_complex_zero", "bit_order": "256qam_gray_from_grouped_streams", "active_layers": "L=1..4", "port_semantics": "codeword_symbol_domain"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["L*19200"], "layout": "codeword_symbol_L_interleaved", "padding": "last_L*48_complex_zero", "bit_order": "256qam_gray_from_grouped_streams", "active_layers": "L=1..4", "port_semantics": "codeword_symbol_domain"}
+    },
+    {
+      "id": "tx_e05_layer_map_to_grid_data",
+      "producer": "layer_map_mimo", "consumer": "mimo_resource_grid_map",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["L",19200], "layout": "layer_data_re", "padding": "[19152,19200)=positive_zero", "bit_order": "qam_symbol_opaque", "active_layers": "L=1..4", "port_semantics": "logical_layer"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["L",19200], "layout": "layer_data_re", "padding": "[19152,19200)=positive_zero", "bit_order": "qam_symbol_opaque", "active_layers": "L=1..4", "port_semantics": "logical_layer"}
+    },
+    {
+      "id": "tx_e06_dmrs_to_grid",
+      "producer": "mimo_dmrs_gen", "consumer": "mimo_resource_grid_map",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["L",2,896], "layout": "layer_dmrs_symbol_packed_comb", "padding": "[798,896)=positive_zero", "bit_order": "not_applicable", "active_layers": "L=1..4 reviewed_distinct_ports", "port_semantics": "layer_port_occ_bound"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["L",2,896], "layout": "layer_dmrs_symbol_packed_comb", "padding": "[798,896)=positive_zero", "bit_order": "not_applicable", "active_layers": "L=1..4 reviewed_distinct_ports", "port_semantics": "layer_port_occ_bound"}
+    },
+    {
+      "id": "tx_e07_grid_to_precode",
+      "producer": "mimo_resource_grid_map", "consumer": "pusch_codebook_precode_or_bypass",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["L",14,1664], "layout": "layer_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "L=1..4", "port_semantics": "logical_layer"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["L",14,1664], "layout": "layer_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "L=1..4", "port_semantics": "logical_layer"}
+    },
+    {
+      "id": "tx_e08_precode_to_remap",
+      "producer": "pusch_codebook_precode_or_bypass", "consumer": "re_map_batch",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,1664], "layout": "port_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "L<=P; bypass_requires_L=P", "port_semantics": "physical_tx_port_P_in_{1,2,4}"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,1664], "layout": "port_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "L<=P; bypass_requires_L=P", "port_semantics": "physical_tx_port_P_in_{1,2,4}"}
+    },
+    {
+      "id": "tx_e09_remap_to_ofdm",
+      "producer": "re_map_batch", "consumer": "ofdm_mod_batch",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,32,64], "layout": "port_symbol_stage4", "padding": "fft_guard_positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_port_batch"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,32,64], "layout": "port_symbol_stage4", "padding": "fft_guard_positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_port_batch"}
+    }
+  ],
+  "hard_gates": [
+    {
+      "id": "tx_combined_device_chain_and_nonzero_e2e",
+      "status": "resolved",
+      "message": "Rank1-4 staged-device 23-slot nonzero coded TX-to-RX LDPC loops are verified.",
+      "artifact_evidence": [
+        {"path": "chain/pusch_mimo_loopback/evidence/rank1_23slot_e2e.json", "required": {"status": "PASS", "rank": 1, "slots": 23, "matched_info_ber": 0.0, "complete_coded_e2e": true}, "numeric": {"tx_bits_nonzero": {"min_exclusive": 0}, "wrong_cell_info_ber": {"min": 0.4, "max": 0.6}}},
+        {"path": "chain/pusch_mimo_loopback/evidence/rank2_23slot_e2e.json", "required": {"status": "PASS", "rank": 2, "slots": 23, "matched_info_ber": 0.0, "complete_coded_e2e": true}, "numeric": {"tx_bits_nonzero": {"min_exclusive": 0}, "wrong_cell_info_ber": {"min": 0.4, "max": 0.6}}},
+        {"path": "chain/pusch_mimo_loopback/evidence/rank3_23slot_e2e.json", "required": {"status": "PASS", "rank": 3, "slots": 23, "matched_info_ber": 0.0, "complete_coded_e2e": true}, "numeric": {"tx_bits_nonzero": {"min_exclusive": 0}, "wrong_cell_info_ber": {"min": 0.4, "max": 0.6}}},
+        {"path": "chain/pusch_mimo_loopback/evidence/rank4_23slot_e2e.json", "required": {"status": "PASS", "rank": 4, "slots": 23, "matched_info_ber": 0.0, "complete_coded_e2e": true}, "numeric": {"tx_bits_nonzero": {"min_exclusive": 0}, "wrong_cell_info_ber": {"min": 0.4, "max": 0.6}}}
+      ],
+      "evidence": []
+    }
+  ]
+}

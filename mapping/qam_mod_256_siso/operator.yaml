@@ -1,0 +1,196 @@
+schema_version: 1
+
+id: T8
+name: qam_mod_256_siso
+aliases: [qam_mod_256]
+category: mapping
+chain: tx
+spatial_mode: siso
+status: implemented_npu_verified
+knowledge_status: extracted_with_source_conflicts_documented
+
+paths:
+  source: kernels/mapping/qam_mod_256_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/qam_mod_256
+  knowledge: kernels/mapping/qam_mod_256_siso/KNOWLEDGE.md
+  conversation: conversations/T8_qam_mod_256.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  observed_cann_version: 8.0.0
+  cann_version_status: observed_from_local_toolkit_not_clean_revalidated
+
+interface:
+  inputs:
+    - name: bits
+      dtype: int16
+      shape: [8, 12, 1600]
+      layout: stream_data_symbol_padded_subcarrier
+      stream_order: [I_c0_sign, I_c1, I_c2, I_c3, Q_c0_sign, Q_c1, Q_c2, Q_c3]
+      corresponding_demod_order: [I_b3, I_b2, I_b1, I_b0, Q_b3, Q_b2, Q_b1, Q_b0]
+      nr_bit_index_order: [0, 2, 4, 6, 1, 3, 5, 7]
+      valid_per_symbol: 1596
+      zero_padding_per_symbol: 4
+      allocation_elements_per_stream: 19200
+      constraints:
+        - values_are_zero_or_one
+        - four_padding_values_per_symbol_are_zero
+      symmetry: matches_qam_demod_256_siso_output
+  outputs:
+    - name: x_re
+      dtype: fp16
+      shape: [14, 1664]
+      layout: physical_symbol_by_padded_subcarrier
+      valid_region: "non-DMRS symbols; subcarriers [0,1596)"
+      zero_region: "DMRS symbols 2 and 11; subcarriers [1596,1664)"
+    - name: x_im
+      dtype: fp16
+      shape: [14, 1664]
+      layout: physical_symbol_by_padded_subcarrier
+      valid_region: "non-DMRS symbols; subcarriers [0,1596)"
+      zero_region: "DMRS symbols 2 and 11; subcarriers [1596,1664)"
+
+algorithm:
+  family: 5g_nr_256qam_modulation
+  constellation: square_gray_256qam
+  decomposition: independent_16pam_i_and_q
+  bits_per_symbol: 8
+  bits_per_axis: 4
+  pam_levels: [-15, -13, -11, -9, -7, -5, -3, -1, 1, 3, 5, 7, 9, 11, 13, 15]
+  level_formula: "d0 * (8 - d1 * (4 - d2 * (3 - 2*c3))), dk = 2*ck - 1"
+  normalization_d: 0.07669649888473704
+  normalization_expression: 1/sqrt(170)
+  average_complex_symbol_power: 1
+  max_axis_magnitude: 1.1504474832710556
+
+geometry:
+  physical_symbols: 14
+  dmrs_symbols: [2, 11]
+  data_symbols: 12
+  subcarriers_used: 1596
+  subcarriers_padded: 1664
+  data_re: 19152
+  input_stream_stride: 19200
+  runtime_parameterized: false
+  tiling_struct_present: true
+  kernel_uses_tiling: false
+
+execution:
+  batch_semantics: one_slot_per_launch
+  host_test_cases_sequential: 5
+  block_dim: 4
+  active_logical_aivs: 4
+  block_index_mapping: "GetBlockIdx() xor 2"
+  data_symbols_per_active_aiv: 3
+  elements_per_active_aiv: 4800
+  compute_dtype: fp16
+  input_cast: int16_to_fp16_CAST_NONE
+  estimated_ub_bytes_per_active_aiv: 112256
+  workspace_bytes: 1048576
+  workspace_used_by_kernel: false
+  implementation: vector_batch3_padded
+  sole_implementation: true
+
+commands:
+  generate: python3 scripts/qam256_mod_ref.py
+  run_default: bash run.sh -r npu -v Ascend310P3
+  run_ascend310p1: bash run.sh -r npu -v Ascend310P1
+  verify_integrated: "main.cpp during run command"
+  verify_one_case: python3 scripts/verify_result.py --data-root data --case case_0_random_a
+
+correctness:
+  status: padded_implementation_verified_on_ascend310p3
+  reference: scripts/qam256_mod_ref.py
+  primary_standard: bit_exact_fp16_bits_vs_reference
+  additional_standards:
+    - zero_padding_in_each_output_row
+    - zero_dmrs_rows_2_and_11
+    - no_0xAAAA_sentinel
+    - five_of_five_cases_pass
+  cases:
+    - case_0_random_a
+    - case_1_all_zero
+    - case_2_all_one
+    - case_3_exhaustive
+    - case_4_random_b
+  migration_observation: all_ten_existing_iq_outputs_cmp_equal_to_golden
+  current_validation:
+    date: 2026-09-06
+    soc: Ascend310P3
+    padded_cases_passed: 5
+    cases_total_per_implementation: 5
+    padded_valid_regions_equal_compact: true
+    padded_gaps_zero: true
+    sole_implementation_revalidation:
+      cases_passed: 5
+      cases_total: 5
+      latest_min_us_per_launch: 9.13
+      latest_median_us_per_launch: 9.37
+  historical_round_trip:
+    status: historical_not_clean_revalidated
+    result: zero_errors_in_4000_bits_and_256_of_256_constellation_points
+
+performance:
+  status: observed_current_host_wall_clock_no_msprof
+  benchmark_implementation: "8 warmups; 10 groups x 100 launches; host-clock min and median"
+  historical_result:
+    soc: Ascend310P3
+    correctness: five_of_five_pass
+    min_us_per_launch: 10.25
+    median_us_per_launch: 11.08
+  current_ab_result:
+    date: 2026-09-06
+    soc: Ascend310P3
+    process_runs_per_implementation: 5
+    compact_median_of_reported_medians_us: 11.01
+    vector_batch3_padded_median_of_reported_medians_us: 10.12
+    median_improvement_percent: 8.1
+    compact_median_of_reported_minima_us: 10.12
+    vector_batch3_padded_median_of_reported_minima_us: 9.22
+    min_improvement_percent: 8.9
+    report: summarized_in_knowledge_md_experiment_file_removed
+  selected_implementation_latest_run:
+    min_us_per_launch: 9.13
+    median_us_per_launch: 9.37
+  msprof_available: false
+
+generated_artifacts:
+  - data/golden/**
+  - data/ascend_output/**
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "**/__pycache__/**"
+  - "*.pyc"
+  - "*.bin"
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+
+known_limitations:
+  - fixed_14_symbol_133rb_geometry
+  - fixed_dmrs_symbols_2_and_11
+  - tiling_data_ignored_by_kernel
+  - int16_bits_are_not_bit_packed
+  - input_value_and_tail_constraints_are_not_checked
+  - split_real_imaginary_output_not_interleaved_complex
+  - custom_stream_order_requires_downstream_contract
+  - no_current_msprof_data
+  - reference_has_no_live_sionna_dependency
+
+next_tasks:
+  - revalidate_padded_implementation_on_ascend310p1
+  - add_explicit_unit_power_gray_adjacency_and_unique_constellation_assertions
+  - add_invalid_input_and_nonzero_tail_negative_tests
+  - either_use_runtime_tiling_or_remove_parameterization_claim
+  - add_end_to_end_scramble_to_demod_bit_order_regression
+  - collect_msprof_after_correctness_revalidation
+  - run_end_to_end_regression_with_padded_scramble_output

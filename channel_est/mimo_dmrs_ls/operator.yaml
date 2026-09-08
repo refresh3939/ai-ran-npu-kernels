@@ -1,0 +1,169 @@
+schema_version: 1
+
+id: R7A
+name: mimo_dmrs_ls
+aliases: [pusch_mimo_dmrs_ls]
+category: channel_est
+domain: mimo
+chain: rx
+spatial_mode: mimo
+status: implemented_host_and_npu_verified
+knowledge_status: current_clean_tree_verified
+
+paths:
+  source: kernels/channel_est/mimo_dmrs_ls
+  promotion_target: kernels/channel_est/mimo_dmrs_ls
+  knowledge: kernels/channel_est/mimo_dmrs_ls/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  default_soc_version: Ascend310P1
+  current_cann_path: /usr/local/Ascend/ascend-toolkit/latest
+
+configuration:
+  build_profiles:
+    nr: [16, 32, 64]
+    block_dim: {16: 1, 32: 2, 64: 4}
+    ranks: [1, 2, 3, 4]
+    symbols: 14
+    used_subcarriers: 1596
+    padded_subcarriers: 1664
+    num_dmrs_symbols: 2
+    dmrs_type: 1
+    dmrs_ports: [1000, 1001, 1002, 1003]
+  unsupported:
+    - transform_precoding
+    - dmrs_type_2
+    - more_than_two_ports_per_comb
+
+interface:
+  config_type: common/pusch_mimo_types.h::airan::PuschMimoConfig
+  runtime_config_type: common/pusch_mimo_types.h::airan::PuschMimoRuntimeConfig
+  runtime_config_loading: loopback_wrapper_optional_env_fail_closed_before_acl_init
+  layout_type: common/pusch_mimo_types.h::airan::PuschMimoLayout
+  batch: one_slot_per_launch
+  inputs:
+    - {name: rx_grid_re, dtype: fp16, shape: [NR, 14, 1664], layout: rx_symbol_sc}
+    - {name: rx_grid_im, dtype: fp16, shape: [NR, 14, 1664], layout: rx_symbol_sc}
+    - {name: dmrs_ref_re, dtype: fp16, shape: [L, 2, 896], layout: layer_dmrs_pilot}
+    - {name: dmrs_ref_im, dtype: fp16, shape: [L, 2, 896], layout: layer_dmrs_pilot}
+  outputs:
+    - {name: h_ls_re, dtype: fp16, shape: [NR, L, 2, 832], layout: rx_layer_dmrs_pilot_natural}
+    - {name: h_ls_im, dtype: fp16, shape: [NR, L, 2, 832], layout: rx_layer_dmrs_pilot_natural}
+    - {name: pilot_count, dtype: uint16, logical_shape: [L, 2], backing_elements: 16, semantics: valid_prefix_per_layer_dmrs}
+    - {name: pilot_sc, dtype: uint16, shape: [L, 2, 832], semantics: physical_sc_per_observation}
+    - {name: noise_var_rx, dtype: fp16, shape: [NR]}
+  padding: producer_zeroed
+
+observation_models:
+  comb_disjoint_798:
+    pilot_count: 798
+    pilot_sc: delta_plus_2p
+    canonical_lmmse_compatible: true
+    legacy_798_pack_compatible: true
+  fd_occ_two_re_399:
+    pilot_count: 399
+    pilot_sc: delta_plus_1_plus_4p
+    canonical_lmmse_compatible: true
+    legacy_798_pack_compatible: false
+
+canonical_lmmse_contract:
+  representation: natural_h_ls_plus_per_layer_pilot_count_and_pilot_sc
+  classifier: DescribeObservationModels
+  validator: ValidateNaturalLmmseContract_pilot_count_and_pilot_sc
+  per_layer_models: [COMB2_798, FD_OCC2_399]
+  mixed_models_allowed: true
+  rank3_example: [FD_OCC2_399, FD_OCC2_399, COMB2_798]
+  hard_fail_on_399: false
+
+lmmse_legacy_adapter:
+  target: channel_est_lmmse_mimo
+  accepted_model: comb_disjoint_798
+  private_storage_shape: [16, 8, 832, 16]
+  column: "2 * (rx mod 8) + dmrs_symbol_index"
+  hard_gate: ValidateLmmse798Compatibility
+  gate_scope: legacy_private_pack_only
+  incompatible_action: skip_legacy_pack_without_failing_canonical_contract
+  no_implicit_399_to_798_expansion: true
+
+execution:
+  block_dim: NR/16
+  rx_per_core: 16
+  core_type: AIV
+  reference_cache_per_core: true
+  comb_gather_reuse: true
+  output_double_buffer:
+    queue: VECOUT
+    depth: 2
+    slot_payload: real_and_imag
+
+commands:
+  host_contract: >-
+    g++ -std=c++17 -Wall -Wextra -Werror -O2
+    scripts/test_contract.cpp mimo_dmrs_ls.cpp
+    -o /tmp/mimo_dmrs_ls_contract_test && /tmp/mimo_dmrs_ls_contract_test
+  generate: PYTHONDONTWRITEBYTECODE=1 python3 scripts/gen_data.py
+  run_nr16: DMRS_LS_NR=16 bash run.sh
+  run_nr64: DMRS_LS_NR=64 bash run.sh
+  verify_replay: PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_result.py
+
+correctness:
+  reference: numpy_kernel_order_fp16
+  cases:
+    - {name: rank1, ports: [1000], pilot_count: [798], canonical_lmmse: accepted, legacy_pack: accepted}
+    - {name: rank2_disjoint, ports: [1000, 1002], pilot_count: [798, 798], canonical_lmmse: accepted, legacy_pack: accepted}
+    - {name: rank3_mixed, ports: [1000, 1001, 1002], pilot_count: [399, 399, 798], canonical_lmmse: accepted, legacy_pack: skipped}
+    - {name: rank4_occ, ports: [1000, 1001, 1002, 1003], pilot_count: [399, 399, 399, 399], canonical_lmmse: accepted, legacy_pack: skipped}
+  current_build:
+    date: 2026-09-07
+    status: pass
+    scope: host_and_Ascend310P1_device_code_compilation
+  artifact_replay:
+    date: 2026-09-07
+    status: pass
+    cases: [rank1, rank2_disjoint, rank3_mixed, rank4_occ]
+    h_ls_max_abs: 0.0
+    ce_pack_max_abs: 0.0
+    noise_max_relative: 0.0012
+  rank3_device_output:
+    status: pass
+    p50_us: 119.9
+  device_relaunch:
+    status: pass_rank_1_through_4
+  loopback_rank4_nr16:
+    date: 2026-09-08
+    status: actual_npu_pass
+    block_dim: 1
+
+performance:
+  status: clean_serial_device_verified
+  soc: Ascend310P1
+  metric: device_event_p50_us
+  warmup: 5
+  timed: 50
+  values:
+    rank1: 40.6
+    rank2_disjoint: 60.6
+    rank3_mixed: 119.9
+    rank4_occ: 144.8
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - data/**
+  - scripts/__pycache__/**
+  - prof/**
+  - profiling/**
+  - "*.o"
+  - "*.so"
+
+known_limitations:
+  - rx_capacity_build_time_16_32_64_only
+  - fixed_14_symbols_1596_used_sc_1664_stride
+  - exactly_two_dmrs_symbols
+  - legacy_private_pack_supports_only_comb_disjoint_798
+  - noise_estimator_assumes_smooth_channel
+
+next_tasks:
+  - add_nonzero_coded_combined_rx_chain_device_executable

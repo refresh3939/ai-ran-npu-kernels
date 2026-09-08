@@ -1,0 +1,195 @@
+schema_version: 1
+
+id: R2
+id_provenance: inferred_from_rx_chain_between_R1_pss_correlator_and_R3_sss_correlator
+name: pss_cfo_estimator
+category: sync
+domain: sync
+chain: rx
+stage: post_pss_fractional_cfo_estimation
+status: implemented_source_changed_needs_clean_revalidation
+knowledge_status: extracted_and_source_checked
+
+paths:
+  source: kernels/sync/pss_cfo_estimator
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/pss_cfo_estimator
+  knowledge: kernels/sync/pss_cfo_estimator/KNOWLEDGE.md
+  conversation: conversations/R2_pss_cfo_estimator.md
+  original_conversation: /home/refresh/下载/PSS CFO estimator reuse.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  historical_cann_version: 8.0.0
+  locally_detected_cann_version: 8.0.0
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  inputs:
+    - name: y_at_pss
+      kernel_parameter: y_gm
+      dtype: int16
+      complex_format: cint16_q1_15
+      shape: [256, 2]
+      layout: interleaved_iq
+      bytes: 1024
+    - name: pss_ref
+      kernel_parameter: r_gm
+      dtype: int16
+      complex_format: cint16_q1_15
+      shape: [256, 2]
+      layout: interleaved_iq_full_256_point_reference
+      bytes: 1024
+    - name: coarse_cfo_derotation_twiddle
+      kernel_parameter: scratch_gm
+      dtype: float16
+      shape: [2, 256]
+      layout: split_cos_then_sin
+      bytes: 1024
+      standalone_runner_value: identity_rotation
+    - name: workspace
+      kernel_parameter: ws_gm
+      dtype: uint8
+      shape: platform_lib_api_workspace
+      current_kernel_usage: unused_parameter
+    - name: tiling
+      kernel_parameter: tiling_gm
+      dtype: uint8
+      shape: [128]
+      current_kernel_usage: unused_zero_placeholder
+  outputs:
+    - name: result
+      kernel_parameter: output_gm
+      dtype: float32
+      shape: [8]
+      bytes: 32
+      fields:
+        - {index: 0, name: delta_f_frac, unit: Hz}
+        - {index: 1, name: delta_theta, unit: rad}
+        - {index: 2, name: mag2_c0, unit: matched_filter_energy}
+        - {index: 3, name: mag2_c1, unit: matched_filter_energy}
+        - {range: "4:7", name: padding, expected: 0.0}
+
+algorithm:
+  family: reference_aided_half_symbol_delay_and_correlate
+  method: corresponding_half_matched_filter_phase_difference
+  formula_c0: sum(y_derot[0:128]*conj(pss_ref[0:128]))
+  formula_c1: sum(y_derot[128:256]*conj(pss_ref[128:256]))
+  formula_phase: arg(c1*conj(c0))
+  formula_cfo_hz: delta_theta*sample_rate_hz/(2*pi*n_half)
+  sample_rate_hz: 7680000
+  n_fft: 256
+  n_pss: 256
+  n_half: 128
+  q_scale_inv: 0.000030517578125
+  hz_per_rad_approx: 9549.30
+  unambiguous_range_hz_approx: [-30000, 30000]
+  degenerate_mag2_d_floor: 0.000001
+  pss_reference_length_complex: 256
+  reference_halves_must_correspond: true
+  atan_implementation: CANN_high_level_Atan_plus_scalar_quadrant_restore
+
+execution:
+  batch: {unit: pss_event, size: 1, runtime_parameterized: false}
+  block_dim: 1
+  engine: AIV_vector_plus_scalar
+  aiv_mapping_xor_2: false
+  selected_aiv_id: 0
+  iq_split:
+    primitive: GatherMask
+    source_elements_per_input: 512
+    repeat_times: 4
+  derotation:
+    enabled_in_current_kernel: true
+    twiddle_generation_location: host_or_upstream
+    standalone_runner_coverage: identity_only
+  reduction:
+    dtype: float16
+    streams: [c0_re, c0_im, c1_re, c1_im]
+    primitive: WholeReduceSum
+    mask: 128
+    repeat_times: 1
+  scalar_math_dtype: float32
+  tiling: zero_placeholder_128_bytes
+
+commands:
+  generate: python3 scripts/pss_cfo_estimator_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: bash run.sh -r npu -v Ascend310P3
+  verify_note: verification_is_integrated_into_host_runner_and_no_separate_verify_script_exists
+
+correctness:
+  status: historical_identity_twiddle_needs_current_clean_revalidation
+  reference: numpy_generated_3gpp_pss
+  reference_truth_scope: post_quantization_same_estimator_formula
+  comparison: absolute_kernel_vs_reference_delta_f_error_hz
+  success_pattern: "5 / 5 PASS"
+  cases:
+    - {name: case_0_no_cfo, injected_hz: 0, tolerance_hz: 50}
+    - {name: case_1_small_positive, injected_hz: 500, tolerance_hz: 50}
+    - {name: case_2_mid_positive, injected_hz: 5000, tolerance_hz: 100}
+    - {name: case_3_negative, injected_hz: -10000, tolerance_hz: 100}
+    - {name: case_4_cfo_plus_noise, injected_hz: 5000, snr_db: 10, tolerance_hz: 300}
+  historical_ascend310p3:
+    pass_count: 5
+    total_count: 5
+    maximum_kernel_vs_reference_error_hz: 2.09
+    current_clean_rerun_performed: false
+    current_nonzero_twiddle_covered: false
+
+performance:
+  status: historical_stale_after_derotation_change
+  msprof_available: false
+  historical_soc: Ascend310P3
+  historical_cann: 8.0.0
+  warmup_runs: 10
+  timed_samples: 50
+  single_launch_plus_sync_us: {min: 25.2, average: 27.1, p50: 25.6, p99: 36.8, max: 36.8}
+  ten_launches_per_sync_amortized_us: {min: 11.9, average: 14.6, p50: 13.3, p99: 31.9, max: 31.9}
+  notes:
+    - amortized_wall_clock_is_not_msprof_device_duration
+    - historical_measurement_predates_current_twiddle_derotation_path
+    - early_3_to_5_us_prediction_was_rejected_by_measurement
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**/*.bin
+  - data/ascend_output/**/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - __pycache__/**
+  - "*.pyc"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+  - "*.zip"
+
+known_limitations:
+  - no_clean_npu_build_run_or_benchmark_during_migration
+  - nonzero_derotation_twiddle_path_not_covered_by_standalone_runner
+  - python_reference_does_not_model_current_twiddle_derotation
+  - only_n_id_2_zero_in_current_five_cases
+  - no_multi_snr_monte_carlo_or_end_to_end_chain_validation
+  - truth_validates_implementation_consistency_more_than_injected_cfo_rmse
+  - absolute_degenerate_threshold_not_calibrated_to_upstream_noise_floor
+  - no_explicit_valid_flag
+  - no_multi_shot_averaging_or_wrong_n_id_2_rejection
+  - cpu_debug_mode_unsupported
+  - fixed_fs_fft_shape_quantization_and_single_event_batch
+  - source_contains_stale_interface_size_comments
+  - no_msprof_for_current_derotation_version
+
+next_tasks:
+  - add_nonzero_coarse_cfo_twiddle_reference_and_kernel_cases
+  - clean_build_and_run_on_Ascend310P3_with_CANN_8_0_0
+  - test_all_three_n_id_2_values_and_snr_monte_carlo
+  - separate_injected_cfo_error_from_kernel_vs_reference_error
+  - calibrate_confidence_against_pss_correlator_noise_floor
+  - add_wrap_zero_threshold_and_determinism_cases
+  - profile_current_kernel_with_msprof_and_save_raw_logs
+  - fix_stale_source_comments_in_a_separate_regression_tested_change
+  - validate_pss_correlator_to_cfo_combiner_end_to_end_handoff

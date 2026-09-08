@@ -1,0 +1,230 @@
+schema_version: 1
+
+id: R15
+id_provenance: inferred_from_current_19_operator_rx_chain_index
+name: timing_tracker
+category: sync
+domain: sync
+chain: rx
+stage: post_channel_estimation_per_slot_timing_tracking
+status: implemented_needs_clean_npu_revalidation
+knowledge_status: conversation_extracted_and_current_source_checked
+
+paths:
+  source: kernels/sync/timing_tracker
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/timing_tracker
+  knowledge: kernels/sync/timing_tracker/KNOWLEDGE.md
+  conversation: conversations/R15_timing_tracker.md
+  original_conversation: /home/refresh/下载/Timing tracker.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_verified_soc_version: Ascend310P3
+  historical_cann_version: 8.0.0
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  inputs:
+    - name: h_re
+      dtype: float16
+      shape: [14, 1664]
+      layout: split_real_symbol_major_zero_padded_grid
+      bytes: 46592
+      consumed_region:
+        symbols: [2, 11]
+        subcarriers: "[0,220)"
+    - name: h_im
+      dtype: float16
+      shape: [14, 1664]
+      layout: split_imag_symbol_major_zero_padded_grid
+      bytes: 46592
+      consumed_region:
+        symbols: [2, 11]
+        subcarriers: "[0,220)"
+    - name: w_re
+      dtype: float16
+      shape: [64, 64]
+      role: idft64_matrix_real
+    - name: w_im
+      dtype: float16
+      shape: [64, 64]
+      role: idft64_matrix_imag
+    - name: tw_re
+      dtype: float16
+      shape: [64, 64]
+      role: idft4096_twiddle_real
+    - name: tw_im
+      dtype: float16
+      shape: [64, 64]
+      role: idft4096_twiddle_imag
+    - name: dt_scale
+      dtype: float32
+      shape: [1]
+      unit: output_samples_per_idft_bin
+      unit_test_value: 1.0
+      real_chain_candidate_value: 0.5
+      real_chain_value_status: unverified
+    - name: scratch
+      dtype: float16
+      shape: [24576]
+      bytes: 49152
+      layout: six_planes_of_4096
+    - name: workspace
+      dtype: uint8
+      shape: platform_lib_api_workspace
+    - name: tiling
+      dtype: uint8
+      shape: "2*sizeof(TCubeTiling)"
+      current_kernel_usage: placeholder_not_read
+  outputs:
+    - name: cir_re
+      dtype: float16
+      shape: [4096]
+      layout: physical_time_order
+      bytes: 8192
+    - name: cir_im
+      dtype: float16
+      shape: [4096]
+      layout: physical_time_order
+      bytes: 8192
+    - name: delta_T
+      dtype: float32
+      shape: [1]
+      unit: samples
+      bytes: 4
+
+algorithm:
+  family: cir_peak_timing_estimator
+  method: averaged_cfr_zero_pad_idft_argmax_parabolic_interpolation
+  reference_attribution: historical_conversation_attributes_cfr_idft_cir_argmax_to_oai
+  reference_attribution_status: not_independently_reverified_during_migration
+  fft_size: 4096
+  factorization: [64, 64]
+  valid_frequency_bins: 220
+  dmrs_symbols: [2, 11]
+  ref_offset: 0
+  search_window_samples: 72
+  search_interval: "[-72,72)"
+  search_padded_elements: 160
+  idft_sign: positive_exponent
+  output_scale: 0.000244140625
+  peak_interpolation: three_point_parabolic_clipped_to_half_sample
+  formula: "delta_T=-dt_scale*(tau_argmax+parabolic_offset)"
+
+execution:
+  batch:
+    unit: slot
+    size: 1
+    runtime_parameterized: false
+  launch_block_dim: 4
+  active_block_ids: [0]
+  effective_core_count: 1
+  engine: mixed_cube_vector_scalar
+  cube:
+    operation: four_real_mmad_per_complex_matmul
+    m: 64
+    k: 64
+    n: 64
+    n_splits: 4
+    n_sub: 16
+  transpose:
+    api: ConfusionTransposeOnlyCompute
+    dtype: float16
+    shape: [64, 64]
+  argmax:
+    api: ReduceMax
+    dtype: float32
+    cal_index: true
+    index_decode: reinterpret_int32_bit_pattern
+
+commands:
+  generate: python3 scripts/timing_tracker_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  status: historical_pass_current_interface_needs_revalidation
+  reference: numpy_direct_ifft_and_mixed_radix_cross_check
+  reference_is_sionna: false
+  cases: 8
+  coverage:
+    timing_offsets_samples: [0.0, 0.5, -2.0, 5.0, 50.0]
+    snr_db: [40, 20, 10, 30]
+    channels: [single_path, multipath]
+  cir_comparison: max_absolute_error_per_real_imag_plane
+  cir_absolute_tolerance: 0.01
+  delta_T_comparison: absolute_error_samples
+  delta_T_absolute_tolerance: 0.1
+  success_pattern: "[verify] OVERALL: ALL PASS"
+  historical_result:
+    passed: 8
+    total: 8
+    maximum_observed_delta_T_error_samples: 0.0615
+    interface: interleaved_cint16_pre_split_fp16_refactor
+  migration_checks:
+    npu_rerun_performed: false
+    source_cmp: passed_18_of_18_files
+    conversation_cmp: passed_sha256_4452edcdf69d53c45b45361c53e7c9a3ea060142797fce1fd6c969e93c75aff2
+    bash_syntax: passed
+    python_ast: passed_10_of_10_files_without_pyc
+    yaml_parse: passed
+    forbidden_artifact_scan: passed
+
+performance:
+  status: historical_needs_current_interface_rebenchmark
+  measurement_scope: host_timing_around_kernel_launch_and_stream_synchronize
+  msprof_available_in_conversation: false
+  historical_environment:
+    soc: Ascend310P3
+    cann: 8.0.0
+    warmup_runs: 10
+    timed_runs: 50
+  historical_reduce_max_v2_2:
+    min_us: 56.5
+    p50_us: 57.4
+    p99_us: 71.5
+    max_us: 71.5
+    average_us: 58.3
+  historical_scalar_argmax_rejected:
+    min_us: 95.6
+    p50_us: 103.1
+    p99_us: 232.7
+    max_us: 232.7
+    average_us: 117.4
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - weights/**/*.bin
+  - data/golden/**/*.bin
+  - data/ascend_output/**/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - __pycache__/**
+
+known_limitations:
+  - only_block_zero_computes_despite_block_dim_four
+  - fixed_fft_size_4096
+  - fixed_220_frequency_bins
+  - fixed_dmrs_symbols_2_and_11
+  - fixed_ref_offset_zero
+  - fixed_search_window_plus_minus_72
+  - real_chain_dt_scale_not_calibrated
+  - synthetic_numpy_reference_not_sionna_or_ota
+  - strongest_cir_peak_is_not_guaranteed_first_detected_path
+  - current_split_fp16_interface_not_npu_revalidated_after_refactor
+  - no_msprof_phase_breakdown
+
+next_tasks:
+  - run_clean_eight_case_npu_regression_on_Ascend310P3
+  - calibrate_dt_scale_with_2048_point_ofdm_or_ota_golden
+  - verify_channel_est_symbol_major_layout_and_consumed_subcarrier_region
+  - capture_msprof_device_timing_and_pipe_breakdown
+  - add_search_boundary_and_nlos_weak_first_path_cases
+  - design_and_verify_true_multicore_partition_only_if_needed

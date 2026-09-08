@@ -1,0 +1,100 @@
+schema_version: 1
+
+id: T8_MIMO_DMRS_GEN
+name: mimo_dmrs_gen
+aliases: [pusch_mimo_dmrs_gen]
+category: reference_signal
+domain: mimo
+chain: tx
+physical_channel: pusch
+spatial_mode: runtime_rank
+status: implemented_host_and_npu_verified
+runtime_profile_integration: loopback_wrapper_common_abi
+
+paths:
+  source: kernels/mimo/mimo_dmrs_gen
+  staging_source: kernels/tx/mimo_dmrs_gen
+  shared_types: kernels/common/pusch_mimo_types.h
+  readme: kernels/mimo/mimo_dmrs_gen/README.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  abi_version_symbol: airan::PUSCH_MIMO_ABI_VERSION
+  public_args: MimoDmrsGenOpArgsV1
+  config: airan::PuschMimoConfig
+  layout: airan::PuschMimoLayout
+  complex_representation: separate_real_imag_fp16_planes
+  outputs:
+    - {name: dmrs_re, dtype: float16, shape: [L, 2, 896], valid_last_dim: 798}
+    - {name: dmrs_im, dtype: float16, shape: [L, 2, 896], valid_last_dim: 798}
+  runtime_geometry:
+    num_layers: "config.num_layers in [1,4]"
+    num_tx_ports: "config.num_tx_ports in {1,2,4}"
+    constraint: "L <= P"
+  output_padding_contract: "[798,896) is positive zero per layer and DMRS symbol"
+  adapter_owned_resources: [c_init, gold_basis, scratch, physical_output, debug, tiling]
+
+dmrs:
+  type: 1
+  length: 1
+  num_symbols: 2
+  configurable_symbol_mask: true
+  valid_re_per_symbol: 798
+  supported_ports: [1000, 1001, 1002, 1003]
+  port_semantics:
+    1000: {comb_delta: 0, wf: [1, 1], wt: [1]}
+    1001: {comb_delta: 0, wf: [1, -1], wt: [1]}
+    1002: {comb_delta: 1, wf: [1, 1], wt: [1]}
+    1003: {comb_delta: 1, wf: [1, -1], wt: [1]}
+  c_init_inputs: [slot_number, dmrs_symbol_mask, dmrs_scrambling_id, n_scid]
+
+integration:
+  downstream:
+    - {operator: mimo_resource_grid_map, tensor: "dmrs_re/im fp16 [L,2,896]", uses: comb_delta}
+    - {operator: mimo_dmrs_ls, tensor: "dmrs_ref_re/im fp16 [L,2,896]", uses: port_occ}
+  no_reorder_between_adjacent_operators: true
+  shared_runtime_fields: [num_layers, num_tx_ports, dmrs_symbol_mask, dmrs_ports]
+
+execution:
+  public_adapter: CreateRuntime_Enqueue_DestroyRuntime
+  logical_output_shape: [L, 2, 896]
+  legacy_kernel_output_capacity: [4, 2, 896]
+  block_dim: 1
+  stream_synchronize_in_wrapper: false
+  one_in_flight_launch_per_runtime_handle: true
+  tiling_bytes: 128
+
+commands:
+  run: bash run.sh
+  host_contract: bash run_host_contract.sh
+
+correctness:
+  comparison: fp16_elementwise
+  tested_ranks: [1, 2, 3, 4]
+  tested_ports: [1000, 1001, 1002, 1003]
+  reordered_ports: pass
+  shared_and_disjoint_combs: pass
+  c_init_metadata_reference: pass
+  output_padding_zero_reference: pass
+  inactive_physical_layers_zero_reference: pass
+  host_contract_test: pass
+  npu_acceptance: pass_5_profiles_rank_1_through_4_fp16_exact
+  npu_p50_us: {rank1: 6.8, rank2_comb0: 6.8, rank2_reordered: 8.4, rank3: 7.7, rank4: 6.5}
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - data/**
+  - scripts/__pycache__/**
+
+known_limitations:
+  - fixed_14_symbols_133rb_1596_used_1664_padded_geometry
+  - exactly_two_dmrs_symbols_in_current_profile
+  - type1_single_symbol_dmrs_only
+  - ports_1000_through_1003_only
+  - transform_precoding_not_supported
+  - one_in_flight_launch_per_runtime_handle

@@ -1,0 +1,196 @@
+schema_version: 1
+
+id: R16
+id_provenance: inferred_from_current_19_operator_rx_chain_index
+id_conflict:
+  old_rx_numbering_reserves_R10_for: descramble
+  rationale: llr_assemble_is_a_later_inserted_boundary_stage_and_must_not_replace_R10
+  current_clean_collision_for_R16: false
+name: llr_assemble_siso
+aliases: [llr_assemble]
+category: mapping
+category_provenance: pure_layout_transform_grouped_with_clean_mapping_operators
+domain: physical_to_coding_boundary
+chain: rx
+spatial_mode: siso
+stage: between_qam_demod_256_and_descramble_in_historical_chain
+status: migrated_standalone_old_geometry_inactive_in_current_rx_chain
+knowledge_status: extracted_with_source_and_chain_conflicts_documented
+
+paths:
+  source: kernels/mapping/llr_assemble_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/llr-assemble
+  knowledge: kernels/mapping/llr_assemble_siso/KNOWLEDGE.md
+  conversations:
+    - conversations/RX_CHAIN_rx_chain.md
+    - conversations/RX_CHAIN_rx_chain_v2.md
+  original_conversations:
+    - /home/refresh/下载/rx_chain.md
+    - /home/refresh/下载/rx_chain v2.md
+  standalone_conversation: missing_not_found
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+  clean_npu_revalidated: false
+
+interface:
+  inputs:
+    - name: llr_in_gm
+      dtype: int16
+      q_format: Q11.5
+      shape: [24, 8, 19200]
+      layout: slot_stream_position
+      valid_per_slot_stream: 19152
+      slot_tail_padding: 48
+      consumed_codeword_per_stream: 449360
+      final_slot_consumed: 8864
+      polarity: positive_means_bit_0
+      stream_order: [I_b3, I_b2, I_b1, I_b0, Q_b3, Q_b2, Q_b1, Q_b0]
+    - name: workspace
+      dtype: uint8
+      bytes: 1048576
+      kernel_usage: unused_abi_placeholder
+    - name: tiling
+      dtype: uint8
+      bytes: 128
+      kernel_usage: unused_zero_placeholder
+  outputs:
+    - name: llr_out_gm
+      dtype: int16
+      q_format: Q11.5
+      shape: [41, 8, 11264]
+      layout: tile_stream_position
+      valid_per_tile_stream: 10960
+      tile_tail_padding: 304
+      total_valid_per_stream: 449360
+      padding_contract: host_must_zero_full_output_before_launch
+
+algorithm:
+  family: per_stream_rope_copy_rechunk
+  arithmetic: none_identity_add_only_for_pipeline_sync
+  source_index: "s=c//19152, p=c%19152"
+  destination_index: "t=c//10960, q=c%10960"
+  mapping: "dst[t,b,q]=src[s,b,p]"
+  stream_reordering: false
+  bit_interleaving: false
+  llr_scaling: false
+  sequential_concat_assumption: unverified_against_real_tx_or_sionna_chain
+  max_copy_elements: 10960
+  max_copy_bytes: 21920
+
+geometry:
+  streams: 8
+  input_slots: 24
+  source_valid: 19152
+  source_stride: 19200
+  output_tiles: 41
+  destination_valid: 10960
+  destination_stride: 11264
+  codeword_per_stream: 449360
+  codeword_all_streams: 3594880
+  input_bytes: 7372800
+  output_bytes: 7389184
+
+execution:
+  batch_scope: one_historical_transport_block
+  block_dim: 4
+  logical_aiv_mapping: get_block_idx_xor_2
+  streams_per_aiv: 2
+  stream_assignment: b_equals_aiv_id_plus_k_times_4
+  ub_bytes: 21920
+  tiling_runtime_parameterized: false
+  host_output_memset_required: true
+
+commands:
+  generate: python3 scripts/gen_data.py
+  run_default: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+  migration_note: commands_not_executed_except_static_and_lightweight_reference_checks
+
+correctness:
+  migration_status: static_and_numpy_reference_verified
+  migrated_files_cmp: 11_of_11
+  reference: scripts/gen_data.py
+  reference_scope: self_consistent_sequential_concat_only
+  npu_revalidation: not_run_by_request
+  historical:
+    bit_exact: true
+    destination_padding_zero: true
+    status: HISTORICAL
+  rejected_claim: self_generated_reference_does_not_prove_real_re_to_codeword_mapping
+
+current_chain_conflicts:
+  - status: STALE
+    issue: standalone_output_shape_does_not_match_current_descramble_input
+    standalone_output: [41, 8, 11264]
+    current_descramble_input: [23, 8, 19200]
+  - status: STALE
+    issue: standalone_valid_length_differs_from_current_rate_dematch_G
+    standalone_all_stream_llr: 3594880
+    current_all_stream_llr: 3523968
+    difference: 70912
+  - status: VERIFIED
+    issue: current_rx_chain_skips_llr_assemble_because_adapter_is_fused_into_descramble
+  - status: VERIFIED
+    issue: resolved_qam_grouped_stream_order_and_symbol_padding_are_handled_by_descramble
+    qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+    descramble_nr_bit_to_qam_stream: [0, 4, 1, 5, 2, 6, 3, 7]
+
+performance:
+  status: historical_old_geometry_not_clean_revalidated
+  msprof_available: false
+  historical_standalone:
+    median_us_per_tb: 75.0
+    min_us_per_tb: 72.9
+    source: RX_operator_description_document
+  later_integrated_observations_us_per_tb: approximately_80_to_93_with_other_noisier_runs
+
+conversation_provenance:
+  standalone_complete_conversation_found: false
+  related_complete_conversations:
+    - name: rx_chain
+      uuid: 67a19008-b741-4d63-918d-eda1b0f0909e
+      archive: conversations/RX_CHAIN_rx_chain.md
+    - name: rx_chain_v2
+      uuid: 4ee721d7-2500-4439-8eac-51b312dde14b
+      archive: conversations/RX_CHAIN_rx_chain_v2.md
+  historical_commands_executed_during_migration: false
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**
+  - data/ascend_output/**
+  - prof/**
+  - profiling/**
+  - "**/__pycache__/**"
+  - "*.pyc"
+  - "*.bin"
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+
+known_limitations:
+  - fixed_compile_time_old_24_slot_41_tile_geometry
+  - inactive_and_abi_incompatible_with_current_23_slot_rx_chain
+  - sequential_concat_not_validated_with_real_tx_or_sionna_chain
+  - output_padding_depends_on_host_memset
+  - no_runtime_tiling_geometry
+  - no_stream_order_conversion
+  - no_clean_npu_correctness_benchmark_or_msprof
+  - no_standalone_complete_conversation_found
+
+next_tasks:
+  - keep_inactive_until_one_canonical_tb_geometry_is_selected
+  - run_nonzero_end_to_end_test_for_the_aligned_descramble_adapter
+  - validate_real_slot_re_bit_order_against_tx_or_sionna
+  - parameterize_geometry_or_replace_with_explicit_copy_descriptors_if_reenabled
+  - make_kernel_or_wrapper_guarantee_destination_padding_zero
+  - run_clean_npu_bit_exact_and_capture_raw_msprof_only_after_contract_fix

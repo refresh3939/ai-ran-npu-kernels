@@ -1,0 +1,7 @@
+build*/
+out*/
+data/
+prof*/
+__pycache__/
+*.pyc
+*.bin

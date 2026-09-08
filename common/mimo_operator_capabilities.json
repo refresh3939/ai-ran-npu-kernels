@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "registry_name": "clean_pusch_mimo_npu_v1",
+  "target": "Ascend NPU staged PUSCH MIMO loopback",
+  "variants": [
+    {
+      "name": "rx16_layer16_rank4",
+      "constraints": [
+        {"path": "active.rank", "equals": 4},
+        {"path": "topology.rx_antennas", "maximum": 16},
+        {"path": "receiver.max_rx_antennas", "equals": 64},
+        {"path": "receiver.max_layers", "equals": 16},
+        {"path": "waveform.num_symbols", "equals": 14},
+        {"path": "waveform.used_subcarriers", "equals": 1596},
+        {"path": "waveform.padded_subcarriers", "equals": 1664}
+      ],
+      "runtime": {
+        "rx_bucket": 16,
+        "layer_bucket": 16
+      },
+      "build": {
+        "ce_nr": 16,
+        "ce_nl_source": "active.rank",
+        "ce_retained_rank": 96,
+        "ce_block_dim": 4,
+        "ce_cube_time_fused": true,
+        "detector_rx_capacity": 16,
+        "detector_layer_capacity": 16,
+        "detector_bri_block": 2
+      }
+    },
+    {
+      "name": "rx64_layer16_rank1_4",
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "topology.rx_antennas", "maximum": 64},
+        {"path": "receiver.max_rx_antennas", "equals": 64},
+        {"path": "receiver.max_layers", "equals": 16},
+        {"path": "waveform.num_symbols", "equals": 14},
+        {"path": "waveform.used_subcarriers", "equals": 1596},
+        {"path": "waveform.padded_subcarriers", "equals": 1664}
+      ],
+      "runtime": {
+        "rx_bucket": 64,
+        "layer_bucket": 16
+      },
+      "build": {
+        "ce_nr": 64,
+        "ce_nl_source": "active.rank",
+        "ce_retained_rank": 96,
+        "ce_block_dim": 4,
+        "ce_cube_time_fused": true,
+        "detector_rx_capacity": 64,
+        "detector_layer_capacity": 16,
+        "detector_bri_block": 8
+      }
+    }
+  ],
+  "operators": [
+    {
+      "name": "host_full_digital_channel_8x8",
+      "scope": "host_boundary",
+      "implementation": "chain/pusch_mimo_loopback/radio_profile.py",
+      "required": true,
+      "constraints": [
+        {"path": "topology.architecture", "equals": "full_digital"},
+        {"path": "topology.tx_antennas", "equals": 8},
+        {"path": "topology.rx_antennas", "equals": 8}
+      ]
+    },
+    {
+      "name": "qam_mod_256_mimo",
+      "scope": "tx",
+      "implementation": "mapping/qam_mod_256_mimo",
+      "required": true,
+      "constraints": [{"path": "waveform.qm", "equals": 8}]
+    },
+    {
+      "name": "layer_map_mimo",
+      "scope": "tx",
+      "implementation": "mapping/layer_map_mimo",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "waveform.data_stride_per_layer", "equals": 19200}
+      ]
+    },
+    {
+      "name": "mimo_dmrs_gen",
+      "scope": "tx",
+      "implementation": "mimo/mimo_dmrs_gen",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "active.logical_tx_ports", "allowed": [1, 2, 4]},
+        {"path": "waveform.num_dmrs_symbols", "equals": 2}
+      ]
+    },
+    {
+      "name": "mimo_resource_grid_map",
+      "scope": "tx",
+      "implementation": "mapping/mimo_resource_grid_map",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "active.logical_tx_ports", "allowed": [1, 2, 4]},
+        {"path": "waveform.padded_subcarriers", "equals": 1664}
+      ]
+    },
+    {
+      "name": "pusch_codebook_precode",
+      "scope": "tx",
+      "implementation": "mimo/pusch_codebook_precode",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "active.logical_tx_ports", "allowed": [1, 2, 4]},
+        {"path": "spatial.precoding.mode", "allowed": ["bypass", "codebook"]}
+      ]
+    },
+    {
+      "name": "ofdm_mod_batch",
+      "scope": "tx",
+      "implementation": "ofdm/ofdm_mod_batch",
+      "required": true,
+      "constraints": [
+        {"path": "waveform.fft_size", "equals": 2048},
+        {"path": "waveform.num_symbols", "equals": 14}
+      ]
+    },
+    {
+      "name": "ofdm_demod_batch",
+      "scope": "rx",
+      "implementation": "ofdm/ofdm_demod_batch",
+      "required": true,
+      "constraints": [
+        {"path": "waveform.fft_size", "equals": 2048},
+        {"path": "waveform.num_symbols", "equals": 14}
+      ]
+    },
+    {
+      "name": "mimo_dmrs_ls",
+      "scope": "rx",
+      "implementation": "channel_est/mimo_dmrs_ls",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "topology.rx_antennas", "maximum": 64},
+        {"path": "waveform.num_dmrs_symbols", "equals": 2},
+        {"path": "waveform.padded_subcarriers", "equals": 1664}
+      ]
+    },
+    {
+      "name": "channel_est_lmmse_mimo",
+      "scope": "rx",
+      "implementation": "channel_est/channel_est_lmmse_mimo",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "topology.rx_antennas", "equals": 8},
+        {"path": "waveform.used_subcarriers", "equals": 1596}
+      ]
+    },
+    {
+      "name": "mimo_detect_io_pack",
+      "scope": "rx",
+      "implementation": "mimo/mimo_detect_io_pack",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "topology.rx_antennas", "equals": 8},
+        {"path": "receiver.max_rx_antennas", "equals": 64},
+        {"path": "receiver.max_layers", "equals": 16}
+      ]
+    },
+    {
+      "name": "mimo_detect_bri_batch",
+      "scope": "rx",
+      "implementation": "mimo/mimo_detect_bri_batch",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "receiver.max_rx_antennas", "equals": 64},
+        {"path": "receiver.max_layers", "equals": 16},
+        {"path": "waveform.padded_subcarriers", "equals": 1664}
+      ]
+    },
+    {
+      "name": "qam_demod_256_mimo_batch",
+      "scope": "rx",
+      "implementation": "mapping/qam_demod_256_mimo_batch",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "waveform.qm", "equals": 8}
+      ]
+    },
+    {
+      "name": "layer_demap_mimo",
+      "scope": "rx",
+      "implementation": "mapping/layer_demap_mimo",
+      "required": true,
+      "constraints": [
+        {"path": "active.rank", "allowed": [1, 2, 3, 4]},
+        {"path": "waveform.data_stride_per_layer", "equals": 19200}
+      ]
+    }
+  ]
+}

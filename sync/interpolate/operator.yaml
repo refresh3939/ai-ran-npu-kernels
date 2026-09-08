@@ -1,0 +1,151 @@
+schema_version: 1
+
+id: T15
+name: interpolate
+category: sync
+domain: sample_rate_conversion
+chain: tx_low_rate_ssb_backend
+status: implemented_historical_verified
+knowledge_status: extracted_needs_clean_revalidation
+
+id_provenance:
+  status: inferred
+  basis: downstream_of_current_T14_ofdm_mod
+  conflict: legacy_T15_was_cp_addition_now_absorbed_by_ofdm_mod
+
+paths:
+  source: kernels/sync/interpolate
+  source_origin: /home/refresh/AI-RAN-NPU/kernels/tx/interpolate
+  knowledge: kernels/sync/interpolate/KNOWLEDGE.md
+  conversation: conversations/T15_interpolate.md
+
+target:
+  architecture: dav_m200
+  primary_soc: Ascend310P3
+  declared_soc_versions: [Ascend310P1, Ascend310P3]
+  verified_soc_versions_historical: [Ascend310P3]
+  cann_version: 8.0.0
+  cann_version_source: local_version_cfg_at_migration
+
+io:
+  input:
+    name: in_iq
+    dtype: int16
+    layout: interleaved_iq
+    shape: [307200]
+    logical_shape: [153600, 2]
+    complex_samples: 153600
+    sample_rate_hz: 7680000
+  fir_taps:
+    name: fir_taps
+    dtype: float16
+    layout: flat_direct_order
+    shape: [96]
+  output:
+    name: out_iq
+    dtype: int16
+    layout: interleaved_iq
+    shape: [2457600]
+    logical_shape: [1228800, 2]
+    complex_samples: 1228800
+    sample_rate_hz: 61440000
+  workspace:
+    dtype: uint8
+    shape: platform_workspace_size
+  tiling:
+    dtype: uint32
+    shape: [10240]
+    semantics: gather_byte_offsets_not_generic_tiling
+
+algorithm:
+  family: polyphase_fir_interpolator
+  interpolation_factor: 8
+  anti_imaging: true
+  fir_taps: 96
+  phases: 8
+  taps_per_phase: 12
+  filter_design: kaiser_windowed_lowpass
+  kaiser_beta: 8.0
+  cutoff_hz: 3840000
+  dc_gain: 8.0
+  group_delay_output_samples: 47.5
+  input_q_test_scale: 512
+  phase_equation: "y[8*m+p] = sum(r=0..11, h[8*r+p] * x[m-r])"
+  interleave_method: int32_iq_pack_plus_gather
+
+execution:
+  batch: 1
+  batch_parameter: compile_time_fixed
+  block_dim: 4
+  input_samples_per_core: 38400
+  output_samples_per_core: 307200
+  input_tile_samples: 1280
+  output_tile_samples: 10240
+  tiles_per_core: 30
+  halo_input_samples: 16
+  estimated_ub_bytes: 213440
+  kernel_arguments: [in_iq, fir_taps, out_iq, workspace, tiling]
+
+commands:
+  generate: python3 scripts/interpolate_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+  profile: bash run.sh -p -v Ascend310P3
+
+correctness:
+  reference: scipy_signal_lfilter_fp64_and_polyphase_fp64
+  polyphase_direct_max_abs_error: 1.0e-6
+  anti_imaging_min_rejection_db: 40.0
+  fp16_sim_max_error_lsb: 2
+  kernel_comparison: int16_iq_elementwise
+  kernel_max_abs_error_lsb_per_component: 2
+  boundary_checks: [head_mid_tail, core_boundaries_307200_614400_921600]
+  clean_migration_validation: static_only
+
+performance:
+  status: historical_needs_clean_rebenchmark
+  metric_scope: one_fixed_shape_kernel_launch_with_stream_synchronize
+  warmup_iterations: 5
+  timed_iterations: 20
+  historical_baseline:
+    min_us: 1203.2
+    avg_us: 1223.8
+    p50_us: 1224.4
+    max_us: 1261.9
+    correctness_max_error_lsb: 1
+  historical_optimized:
+    min_us: 1064.0
+    avg_us: 1107.2
+    p50_us: 1110.1
+    max_us: 1187.5
+    correctness_max_error_lsb: 1
+  msprof_status: not_available_in_conversation
+  bottleneck_hypothesis: mixed_vector_and_mte3_unverified
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - prof/**
+  - weights/*.bin
+  - data/golden/*.bin
+  - data/ascend_output/*.bin
+  - "**/__pycache__/**"
+
+known_limitations:
+  - inferred_operator_id_conflicts_with_legacy_T15_semantics
+  - clean_copy_not_recompiled_or_rebenchmarked
+  - fixed_shape_and_interpolation_factor
+  - input_q_scale_not_calibrated_to_real_usrp
+  - full_band_edge_anti_imaging_not_closed
+  - no_msprof_data_for_final_version
+  - Ascend310P1_declared_but_not_historically_verified
+  - tiling_buffer_is_repurposed_as_gather_index
+
+next_tasks:
+  - confirm_non_conflicting_operator_id
+  - rerun_correctness_from_clean_tree_on_Ascend310P3
+  - rebenchmark_and_bind_results_to_source_hash_and_environment
+  - collect_msprof_pipe_utilization
+  - calibrate_input_q_and_saturation_contract_with_usrp
+  - close_full_band_fir_spec
+  - parameterize_shape_ratio_taps_and_batch

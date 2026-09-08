@@ -1,0 +1,191 @@
+schema_version: 1
+
+id: R8
+name: equalize_zf_siso
+aliases: [equalize]
+category: equalization
+domain: equalization
+chain: rx
+spatial_mode: siso
+status: implemented
+knowledge_status: extracted_current_source_checked_needs_device_rebenchmark
+
+paths:
+  source: kernels/equalization/equalize_zf_siso
+  origin_source: /home/refresh/AI-RAN-NPU/kernels/rx/equalize
+  knowledge: kernels/equalization/equalize_zf_siso/KNOWLEDGE.md
+  conversation: conversations/R8_equalize.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  default_soc_version: Ascend310P3
+  cann_version: "8.0.0"
+  cann_component_version: "7.6.0.1.220"
+  cann_path: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  batch: one_slot_per_launch
+  logical_shape: [14, 1596]
+  kernel_shape: [14, 1664]
+  layout: symbol_major_natural_subcarrier
+  complex_storage: separate_real_imaginary
+  inputs:
+    - name: y_re
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+    - name: y_im
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+    - name: h_re
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+    - name: h_im
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+    - name: n0
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+      semantics: pre_equalization_noise_variance_per_re
+  outputs:
+    - name: x_re
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+    - name: x_im
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+    - name: no_eff
+      dtype: fp16
+      shape: [14, 1664]
+      logical_shape: [14, 1596]
+      semantics: post_equalization_effective_noise_variance
+
+algorithm:
+  family: siso_single_tap_equalization
+  implementation: zero_forcing_with_power_floor
+  unbiased_lmmse_equivalent_under_perfect_csi: true
+  symbols_per_slot: 14
+  logical_subcarriers: 1596
+  padded_subcarriers: 1664
+  channel_power_floor: 1.0e-4
+  equations:
+    g: max(h_re_squared_plus_h_im_squared, channel_power_floor)
+    x_re: (h_re_times_y_re_plus_h_im_times_y_im) / g
+    x_im: (h_re_times_y_im_minus_h_im_times_y_re) / g
+    no_eff: n0 / g
+  gm_dtype: fp16
+  compute_dtype: fp32
+  output_dtype: fp16
+
+execution:
+  block_dim: 4
+  core_type: AIV
+  subcarriers_per_core: 416
+  elements_per_core: 5824
+  schedule: batched_all_symbol_load_compute_store
+  ub_bytes_per_core: 198016
+  workspace_allocation: platform_lib_api_workspace_size
+  workspace_used_by_kernel: false
+  tiling_bytes: 128
+  tiling_mode: zero_placeholder
+  benchmark_warmup_runs: 10
+  benchmark_timed_runs: 50
+
+commands:
+  generate: python3 scripts/equalize_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  reference: numpy_fp32_kernel_aligned_reference
+  independent_sionna_validation: not_done
+  comparison: allclose_with_bounded_failure_fraction
+  absolute_tolerance: 0.01
+  relative_tolerance: 0.03
+  max_failure_fraction_per_stream: 0.001
+  elements_checked_per_stream: 22344
+  cases:
+    - case_0_awgn_only
+    - case_1_flat_fading
+    - case_2_freq_selective
+    - case_3_freq_time_var
+    - case_4_low_snr
+  existing_artifact_replay:
+    status: observed_5_of_5
+    replay_date: 2026-08-27
+    npu_relaunched_during_migration: false
+    artifact_date: 2026-06-26
+    source_artifact_binding: timestamp_only_not_cryptographic
+
+performance:
+  status: current_fp32_source_needs_rebenchmark
+  measurement_scope: host_clock_kernel_launch_plus_stream_synchronize
+  msprof_available: false
+  historical_results:
+    - version: padded_split_fp32
+      p50_us: 116.7
+      avg_us: 141.7
+      correctness: 5_of_5
+      source_status: historical
+    - version: split_fp16
+      p50_us: 63.7
+      avg_us: 65.1
+      correctness: 5_of_5
+      source_status: stale
+    - version: full_grid_fp16_per_symbol
+      p50_us: 89.5
+      avg_us: 90.3
+      correctness: 5_of_5
+      source_status: stale
+    - version: full_grid_fp16_batched
+      p50_us: 36.6
+      avg_us: 38.3
+      p99_us: 57.5
+      one_ms_slot_headroom: 26.1
+      correctness: 5_of_5
+      source_status: stale_relative_to_current_fp32_kernel
+
+generated_artifacts:
+  - data/golden/**/*.bin
+  - data/ascend_output/**/*.bin
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - scripts/__pycache__/**
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+
+known_limitations:
+  - fixed_siso_single_layer_single_tap
+  - fixed_14_symbols_1596_logical_subcarriers_1664_padded_subcarriers
+  - fixed_block_dim_4
+  - fixed_channel_power_floor
+  - no_independent_sionna_or_end_to_end_bler_validation
+  - channel_estimation_error_not_independently_modeled
+  - current_fp32_kernel_has_no_archived_benchmark_or_msprof
+  - artifacts_not_cryptographically_bound_to_source_and_environment
+  - stale_fp16_comment_in_equalize_header
+  - operator_id_R8_conflicts_with_existing_cfo_estimate_metadata
+
+next_tasks:
+  - regenerate_build_run_and_verify_in_clean_tree_with_checksums
+  - benchmark_and_msprof_current_fp32_batched_kernel
+  - add_large_dynamic_range_zero_channel_and_noise_boundary_cases
+  - validate_against_actual_sionna_receiver_configuration_and_bler
+  - define_channel_estimation_error_variance_contract
+  - centralize_grid_constants_and_parameterize_shape_and_batch
+  - resolve_R8_operator_id_collision

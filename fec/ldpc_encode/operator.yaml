@@ -1,0 +1,92 @@
+schema_version: 1
+
+id: T04
+name: ldpc_encode
+chain: tx
+domain: fec
+status: implemented
+knowledge_status: extracted_and_rebenchmarked
+
+paths:
+  source: kernels/fec/ldpc_encode
+  knowledge: kernels/fec/ldpc_encode/KNOWLEDGE.md
+  conversation: conversations/T04_ldpc_encode.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_cann_version: 8.0.0
+
+algorithm:
+  family: 5g_nr_qc_ldpc
+  implementation: shift_table_vector
+  base_graph: BG1
+  lifting_size: 384
+  information_bits_per_cb: 8448
+  encoded_bits_per_cb: 25344
+  punctured_prefix_bits: 768
+
+execution:
+  input_dtype: int8
+  output_dtype: int8
+  batch_parameter: compile_time
+  n_cb: 143
+  block_dim: 4
+  cb_assignment: aiv_stride_4
+  vector_dtype: int16
+  vector_width: 384
+  ub_cyclic_layout: duplicate_full_z
+  shift_table_reuse: compact_once_per_aiv
+
+validation:
+  reference: Sionna-1.2.2
+  generate_command: conda run -n sionna python scripts/ldpc_ref.py
+  run_command: bash run.sh -r npu -v Ascend310P1
+  verify_command: python scripts/verify_result.py
+  success_pattern: "[PASS]"
+  comparison: bit_exact
+  current_coverage: first_four_golden_cbs_tiled_to_n_cb
+
+performance:
+  status: verified_on_ascend310p1
+  metric_scope: kernel_launch_for_batch
+  coded_output_throughput: true
+  benchmark_method: 3_warmups_20_samples_10_launches_per_sync
+  clean_baseline:
+    n_cb: 143
+    latency_us: 1979.44
+    coded_output_gbps: 1.831
+  optimized:
+    n_cb: 143
+    latency_us: 755.90
+    coded_output_gbps: 4.795
+    speedup: 2.62
+    latency_reduction_percent: 61.8
+  historical_current:
+    n_cb: 4
+    latency_us: 55
+    coded_output_gbps: 1.83
+  historical_image_sized:
+    n_cb: 143
+    latency_ms: 1.977
+
+generated_artifacts:
+  - data/golden/*.bin
+  - data/weights/**/*.bin
+  - data/ascend_output/*.bin
+  - build/**
+  - out/**
+  - prof_out/**
+
+known_limitations:
+  - only_BG1_Z384
+  - n_cb_requires_rebuild
+  - large_batch_validation_repeats_four_base_vectors
+  - clean_directory_is_not_yet_a_git_repository
+
+next_tasks:
+  - add_random_and_boundary_correctness_vectors
+  - parameterize_n_cb_at_runtime
+  - reduce_per_edge_scalar_dispatch

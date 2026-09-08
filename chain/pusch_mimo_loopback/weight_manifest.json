@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "policy": "generated weights are explicit inputs; exact byte count, nonzero payload and SHA-256 are mandatory",
+  "runtime_generated_manifest_pattern": "work/*/weight_manifest.json",
+  "weights": {
+    "ofdm_mod": [
+      "iw_dft32_re.bin", "iw_dft32_im.bin", "iw_dft64_re_T.bin",
+      "iw_dft64_im_T.bin", "itwiddle_pq_re.bin", "itwiddle_pq_im.bin"
+    ],
+    "ofdm_demod": [
+      "w_dft32_re.bin", "w_dft32_im.bin", "w_dft64_re_T.bin",
+      "w_dft64_im_T.bin", "twiddle_pq_re.bin", "twiddle_pq_im.bin"
+    ],
+    "re_demap_batch": ["gather_idx.bin"]
+  },
+  "runtime_weight_inputs_verified": [
+    "ldpc_encode Sionna-derived BG1/Z384 shift matrices",
+    "channel_est_lmmse_mimo rank/pilot-count/pilot-location-bound weights",
+    "ldpc_decode Sionna-derived shifts/degrees/edge offsets"
+  ]
+}

@@ -1,0 +1,239 @@
+schema_version: 1
+
+id: TX_HOST_MERGE_DMRS
+historical_op_id: null
+op_id_status: verified_no_independent_entry_in_historical_tx_15_operator_table
+parent_historical_stage:
+  id: T11
+  name: dmrs_generation
+  rationale: historical_T11_grid_in_grid_out_semantics_include_pilot_insertion
+id_conflicts:
+  - status: OBSERVED
+    issue: historical_table_orders_T10_re_mapping_before_T11_dmrs_generation_but_current_chain_generates_and_merges_dmrs_before_re_map
+    resolution: use_name_and_path_as_identity_and_do_not_invent_a_numeric_id
+
+name: merge_dmrs_siso
+aliases: [merge_dmrs]
+category: mapping
+category_provenance: host_resource_grid_assembly_between_dmrs_generation_and_re_mapping
+domain: tx_resource_grid_assembly
+chain: tx
+spatial_mode: siso
+stage: dmrs_gen_to_re_map_host_bridge
+role: host_side_helper
+kernel_kind: none
+is_npu_kernel: false
+status: migrated_host_helper_current_tx_chain_has_equivalent_inline_copy
+knowledge_status: source_current_chain_and_conversation_cross_checked
+
+paths:
+  source: kernels/mapping/merge_dmrs_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/merge_dmrs
+  knowledge: kernels/mapping/merge_dmrs_siso/KNOWLEDGE.md
+  integration_note: kernels/mapping/merge_dmrs_siso/TX_CHAIN_INTEGRATION.txt
+  conversations:
+    - conversations/merge_dmrs/Transaction chain overview.md
+    - conversations/merge_dmrs/Transaction chain overview (1).md
+  raw_conversations:
+    - conversations/raw/merge_dmrs/64ec1024-a000-420c-b531-c232b2f9b96c_history.json
+    - conversations/raw/merge_dmrs/64ec1024-a000-420c-b531-c232b2f9b96c_download_export.json
+
+implementation:
+  compute_location: cpu_host
+  device_interaction: synchronous_aclrtMemcpy_only
+  device_pointer_api: true
+  acl_dependency: ascendcl
+  npu_kernel_source_present: false
+  tiling_present: false
+  kernel_launch_present: false
+  standalone_requires_acl_device: true
+  algorithm: clear_two_grid_rows_then_comb2_scatter_valid_dmrs_values
+
+interface:
+  inout:
+    - name: gu_re
+      dtype: float16
+      memory: device
+      shape: [14, 1664]
+      valid_region: "[:,0:1596]"
+    - name: gu_im
+      dtype: float16
+      memory: device
+      shape: [14, 1664]
+      valid_region: "[:,0:1596]"
+  inputs:
+    - name: dmrs_re
+      dtype: float16
+      memory: device
+      shape: [2, 896]
+      logical_valid_shape: [2, 798]
+      ignored_padding_per_row: 98
+    - name: dmrs_im
+      dtype: float16
+      memory: device
+      shape: [2, 896]
+      logical_valid_shape: [2, 798]
+      ignored_padding_per_row: 98
+  output_contract:
+    dmrs_symbols: [2, 11]
+    comb: 2
+    delta: 0
+    pilot_destination: "gu[symbol,2*k], k in [0,798)"
+    odd_re_zero: true
+    padding_region: "[1596,1664)"
+    padding_zero: true
+    non_dmrs_rows_unchanged: true
+
+chain_boundary:
+  upstream:
+    qam_mod_256:
+      output_shape: [14, 1664]
+      dmrs_rows_initially_zero: [2, 11]
+    dmrs_gen:
+      id: T11
+      output_shape: [2, 896]
+      logical_valid_shape: [2, 798]
+      output_planes: [real, imag]
+  downstream:
+    re_map:
+      id: T10
+      input_shape: [14, 1664]
+      reads_per_row: 1596
+      ignores_input_padding: "[1596,1664)"
+      output_shape: [14, 2048]
+      does_dmrs_insertion: false
+    ofdm_mod:
+      input_shape: [14, 2048]
+
+data_movement_per_slot:
+  memcpy_semantics: synchronous
+  d2h:
+    calls: 2
+    bytes_per_call: 3584
+    total_bytes: 7168
+  h2d:
+    calls: 4
+    bytes_per_call: 3328
+    total_bytes: 13312
+  total_calls: 6
+  total_bytes: 20480
+  host_vector_allocations: 6
+  per_23_slot_tb:
+    memcpy_calls: 138
+    d2h_bytes: 164864
+    h2d_bytes: 306176
+    total_bytes: 471040
+  explicit_pre_merge_stream_sync_in_current_tx_chain: true
+
+tx_chain_integration:
+  current_status: equivalent_inline_host_implementation_not_shared_module
+  current_sequence:
+    - qam256_mod_kernel
+    - dmrs_gen_kernel
+    - aclrtSynchronizeStream
+    - inline_host_merge_dmrs
+    - re_map_kernel
+    - ofdm_mod_kernel
+  shared_merge_dmrs_cpp_compiled_by_tx_chain: false
+  integration_note_status: stale_noop_wording_but_valid_future_dedup_recipe
+
+commands:
+  reference: python3 scripts/merge_dmrs_ref.py
+  standalone_device: bash run.sh
+  migration_validation: reference_run_in_temporary_data_directory_plus_static_checks
+
+correctness:
+  migration_status: verified_static_hash_ast_yaml_and_numpy_bit_exact_round_trip
+  reference: scripts/merge_dmrs_ref.py
+  checks:
+    - bit_exact_generated_golden_matches_source_saved_golden
+    - even_re_equals_dmrs_for_both_planes
+    - odd_re_zero_for_both_planes
+    - dmrs_row_padding_zero_for_both_planes
+    - non_dmrs_rows_unchanged
+    - extract_after_insert_round_trip
+  historical_device_standalone:
+    date: 2026-06-22
+    status: HISTORICAL
+    bit_exact_differences: 0
+    round_trip_errors: 0
+    odd_and_padding_nonzero: 0
+    changed_data_elements: 0
+  npu_build_or_run_during_migration: false
+  benchmark_or_msprof_during_migration: false
+
+conversation_archive:
+  standalone_merge_dmrs_conversation_found: false
+  related_complete_conversation:
+    name: Transaction chain overview
+    uuid: 64ec1024-a000-420c-b531-c232b2f9b96c
+    messages: 1391
+    created_at: 2026-06-11T05:43:01.596636Z
+    updated_at: 2026-07-31T03:27:23.714240Z
+  markdown_copies:
+    count: 2
+    cmp_equal: true
+    sha256: 65ecd936bb616b744e9cd0881a2385886423db8ca34a3609f4c733d8b7890dfd
+  raw_json_object_copies:
+    count: 2
+    exact_byte_slices_from_each_export: true
+    json_parse_valid: true
+    cmp_equal: true
+    sha256: c43838c37edf3454d5728d65c7b06329eb1d02d9af226a915e329ec3ecd3e065
+
+migration:
+  mode: whitelist_copy_preserve_original
+  gitignore_update:
+    changed: true
+    rule: "!conversations/merge_dmrs/Transaction chain overview (1).md"
+    rationale: preserve_second_original_conversation_filename_despite_global_parenthesized_copy_ignore
+  source_files:
+    - CMakeLists.txt
+    - TX_CHAIN_INTEGRATION.txt
+    - cmake/cpu_lib.cmake
+    - cmake/npu_lib.cmake
+    - data_utils.h
+    - main.cpp
+    - merge_dmrs.cpp
+    - merge_dmrs.h
+    - run.sh
+    - scripts/merge_dmrs_ref.py
+  unused_but_preserved_build_companions:
+    - cmake/cpu_lib.cmake
+    - cmake/npu_lib.cmake
+    - data_utils.h
+  source_sha256:
+    CMakeLists.txt: 0b5df9320a8fa38d00791c09e2949efca448ebd7ab44d36e0e4e8520c2c46e63
+    TX_CHAIN_INTEGRATION.txt: 2acb9fe29743ce1a4dcfdd96975342f18aa1684c067fc2fc078ae94b1af89e05
+    cmake/cpu_lib.cmake: 8c99e2531dc13a61fae27da68418718fbeec840b7a57ff87875675d37903aef3
+    cmake/npu_lib.cmake: 4a15964dfe891ece771eb6a17eec51b6cde47bd332e8551a1ac5a48eec8d8124
+    data_utils.h: 9019d245d14c4366c6f0e5615d7fb2455f616e76d4df21f5f696f7b1f31ad60f
+    main.cpp: e27a2584b7e32e28341fa48fa88c50711e904e23b053077a6b3ea37994fea94b
+    merge_dmrs.cpp: 450831bc0af0dede09222bf37f8d7392158e6583fa40720a37029e109575b2f8
+    merge_dmrs.h: a1e09a18dac0afd1b853ef79dd4a85bfdf1b13c3fad420689d136ee41005894c
+    run.sh: 939df02266e17d6269d9928de2fa3362b034c9a8615f5a4ea0d35d1de9f9a63c
+    scripts/merge_dmrs_ref.py: e646c6bd6e3c98b4e97a219f80d6f4eb0045bf5b4f724ad46912d56d05e22249
+  excluded:
+    - build/**
+    - out/**
+    - auto_gen/**
+    - data/golden/**/*.bin
+    - profiling/**
+    - cache/**
+    - "**/__pycache__/**"
+    - "*.pyc"
+    - "*.bin"
+    - "*.zip"
+    - "*.o"
+    - "*.so"
+    - "*.a"
+
+known_limitations:
+  - no_independent_historical_numeric_op_id
+  - current_tx_chain_duplicates_the_helper_instead_of_linking_this_source
+  - six_synchronous_memcpy_calls_and_six_host_vector_allocations_per_slot
+  - fixed_siso_14_symbol_1596_subcarrier_comb2_delta0_geometry
+  - standalone_harness_requires_acl_device_despite_host_compute
+  - integration_note_still_refers_to_a_noop_stub
+  - python_reference_defaults_to_synthetic_qpsk_without_DMRS_GEN_GOLDEN
+  - no_clean_device_or_end_to_end_ota_revalidation

@@ -1,0 +1,97 @@
+schema_version: 1
+
+id: R5_batch
+name: ofdm_demod_batch
+aliases: [ofdm_demod_batched]
+category: ofdm
+domain: ofdm
+chain: rx
+spatial_mode: runtime_batch
+status: implemented_npu_verified_clean
+
+paths:
+  source: kernels/ofdm/ofdm_demod_batch
+  moved_from: /home/refresh/AI-RAN-NPU/kernels/rx/ofdm_demod_batch
+  knowledge: kernels/ofdm/ofdm_demod_batch/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  default_soc_version: Ascend310P1
+
+interface:
+  batch_parameter: runtime_uint32
+  default_batch: 8
+  input:
+    name: input_iq
+    dtype: int16
+    logical_dtype: complex_q8_8
+    shape: [B, 30720, 2]
+    layout: interleaved_iq
+  outputs:
+    - {name: output_re, dtype: float16, shape: [B, 14, 32, 64]}
+    - {name: output_im, dtype: float16, shape: [B, 14, 32, 64]}
+  output_contract: unitary_unshifted_stage4
+  gm_scratch: none
+
+algorithm:
+  family: 5g_nr_cp_ofdm_demod
+  implementation: mixed_radix_32x64_low_level_mmad
+  fft_size: 2048
+  symbols_per_slot: 14
+  fused_chain_steps: [cp_removal, iq_deinterleave, fft_2048_core]
+  unitary_normalization_method: folded_into_dft_weights
+  phase3_symbols_stacked_on_m: true
+  max_phase3_m: 128
+  complex_mmad_accumulation: fused
+
+execution:
+  block_dim: 4
+  symbols_per_tile: 4
+  tiles_per_batch: 4
+  scheduling: persistent_tile_stride_block_dim
+  phase0_to_phase1_handoff: B1
+  phase2_to_phase3_handoff: A1
+  weights_persistent_in_l1: true
+  weights_reloaded_to_l0_per_tile: true
+  twiddle_persistent_in_ub: true
+  inter_core_sync: none
+
+commands:
+  generate: OFDM_BATCH_SIZE=8 python3 scripts/ofdm_demod_ref.py
+  run: bash run.sh -r npu -v Ascend310P1 -b 8
+  verify: OFDM_BATCH_SIZE=8 python3 scripts/verify_result.py
+
+correctness:
+  comparison: per_batch_per_symbol_max_abs_error
+  absolute_tolerance: 0.05
+  current_clean_validation:
+    date: 2026-09-06
+    soc: Ascend310P1
+    batch: 8
+    result: pass_112_of_112
+    max_abs_error: 0.0016
+
+performance:
+  scope: host_launch_plus_stream_synchronize
+  warmup_runs: 10
+  timed_runs: 50
+  current_clean_ascend310p1_batch8:
+    latency_min_us: 264.8
+    latency_avg_us: 278.3
+    latency_p50_us: 269.9
+    amortized_p50_us_per_slot: 33.7
+    throughput_slots_per_second: 28741.1
+
+generated_artifacts:
+  - weights/**
+  - data/golden/**
+  - data/ascend_output/**
+  - build/**
+  - out/**
+
+known_limitations:
+  - fixed_fft2048_and_14_symbols
+  - fixed_cp_pattern_176_then_144
+  - fixed_block_dim_4
+  - output_is_unitary_stage4_without_fftshift

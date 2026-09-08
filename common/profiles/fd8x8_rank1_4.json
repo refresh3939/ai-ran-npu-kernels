@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "profile_name": "fd8x8_rank1_4",
+  "topology": {
+    "architecture": "full_digital",
+    "tx_antennas": 8,
+    "tx_rf_chains": 8,
+    "rx_antennas": 8,
+    "rx_rf_chains": 8
+  },
+  "spatial": {
+    "supported_ranks": [1, 2, 3, 4],
+    "port_policy": {
+      "mode": "explicit",
+      "ports_by_rank": {"1": 1, "2": 2, "3": 4, "4": 4}
+    },
+    "precoding": {
+      "default_mode": "bypass",
+      "by_rank": {
+        "3": {"mode": "codebook", "tpmi": 6, "prg_size_rb": 4}
+      }
+    },
+    "antenna_mapping": "semi_unitary_dft"
+  },
+  "waveform": {
+    "qm": 8,
+    "num_symbols": 14,
+    "fft_size": 2048,
+    "num_rb": 133,
+    "rb_start": 0,
+    "used_subcarriers": 1596,
+    "padded_subcarriers": 1664,
+    "dmrs_symbols": [2, 11],
+    "data_re_alignment": 64,
+    "qam_row_alignment": 64
+  },
+  "dmrs": {
+    "ports_by_rank": {
+      "1": [1000],
+      "2": [1000, 1002],
+      "3": [1000, 1001, 1002],
+      "4": [1000, 1001, 1002, 1003]
+    },
+    "symbol_mask": 2052,
+    "type": 1,
+    "length": 1,
+    "num_cdm_groups_without_data": 2
+  },
+  "channel": {
+    "model": "deterministic_unitary",
+    "gain_by_rank": {"1": 0.32, "2": 0.32, "3": 0.5, "4": 0.32},
+    "awgn_std_int16": 80
+  },
+  "receiver": {
+    "channel_estimator": "lmmse",
+    "detector": "bri",
+    "capacity": {"max_rx_antennas": 64, "max_layers": 16},
+    "buckets": {
+      "rx_antennas": [8, 16, 32, 64],
+      "layers": [1, 2, 4, 8, 16]
+    },
+    "rx_capacity_adapter": "zero_pad_signal_repeat_noise"
+  }
+}

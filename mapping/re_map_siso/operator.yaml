@@ -1,0 +1,276 @@
+schema_version: 1
+
+id: T10
+id_status: historical_tx_table_verified_conflicts_with_existing_clean_metadata
+id_provenance:
+  source: /home/refresh/AI-RAN-NPU/PROJECT_MEMORY.md
+  table_entry: "T10 re_mapping"
+  historical_table_position: "T8 qam_modulate, T9 mimo_mapping, T10 re_mapping, T11 dmrs_generation"
+  conflict:
+    status: unresolved_explicit_duplicate
+    conflicting_operator: precode_zf
+    conflicting_metadata: kernels/mimo/pdsch_zf_precode/operator.yaml
+    conflicting_value: T10
+    note: precode_zf documents T10 as inferred; no file was overwritten or renamed
+  uniqueness_rule_until_resolved: use_operator_name_and_path_not_id_alone
+
+name: re_map_siso
+aliases: [re_map]
+category: mapping
+chain: tx
+spatial_mode: siso
+stage: resource_element_mapping_before_ofdm_mod
+status: implemented_historical_npu_pass_needs_clean_revalidation
+knowledge_status: extracted_source_and_cross_operator_layout_checked
+
+paths:
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/re_map
+  source: kernels/mapping/re_map_siso
+  knowledge: kernels/mapping/re_map_siso/KNOWLEDGE.md
+  conversation: conversations/T10_re_map.md
+  conversation_raw: conversations/raw/713edbb7-2d70-4da1-841d-5bb21a177d74.json
+  supporting_conversations:
+    - conversations/TX_CHAIN_tx_chain.md
+    - conversations/R6_re_demap.md
+
+conversation_archive:
+  primary:
+    uuid: 713edbb7-2d70-4da1-841d-5bb21a177d74
+    export_name: Map revision
+    messages: 6
+    complete: true
+    raw_sha256: a4917771f512292b4091b3f4cd78fd8eeb3597b7723742e79ec4e66991a55d9b
+    rendered_sha256: 09aadb1de8186a68086effe6846d8d2a781d600bd4562e58585a245c0c5cf2a1
+  tx_chain:
+    sha256: 65ecd936bb616b744e9cd0881a2385886423db8ca34a3609f4c733d8b7890dfd
+    duplicate_download_copies_cmp_equal: true
+  rx_re_demap:
+    sha256: 886704641552bcdd5f87fcb1cc28b7cf3bcbbc7f0cf99cea53e3b09825da3da5
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  cann_package_path: /usr/local/Ascend/ascend-toolkit/latest
+  cann_version: not_pinned_or_clean_revalidated
+
+interface:
+  batch: one_slot_per_launch
+  inputs:
+    - name: in_re
+      dtype: float16
+      shape: [14, 1664]
+      layout: symbol_major_natural_used_sc
+      valid_region: "subcarriers [0,1596)"
+      padding_region: "[1596,1664); not read by current scatter index"
+    - name: in_im
+      dtype: float16
+      shape: [14, 1664]
+      layout: symbol_major_natural_used_sc
+      valid_region: "subcarriers [0,1596)"
+      padding_region: "[1596,1664); not read by current scatter index"
+    - name: scatter_idx
+      dtype: uint32
+      shape: [2048]
+      layout: output_position_to_fp16_source_byte_offset
+      generated_by: scripts/re_map_ref.py
+      note: inverse_gather_table_not_1596_destination_indices
+    - name: ws
+      dtype: uint8
+      host_allocated_bytes: 1024
+      role: unused_dummy_tail_parameter
+    - name: tiling
+      dtype: uint8
+      host_allocated_bytes: 1024
+      role: unused_dummy_tail_parameter
+  outputs:
+    - name: grid_re
+      dtype: float16
+      shape: [14, 2048]
+      layout: symbol_major_raw_stage4_k1_k2
+    - name: grid_im
+      dtype: float16
+      shape: [14, 2048]
+      layout: symbol_major_raw_stage4_k1_k2
+
+upstream_contract:
+  qam_mod_256:
+    output_shape: [14, 1664]
+    data_symbols: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13]
+    dmrs_rows_initially_zero: [2, 11]
+    valid_subcarriers: 1596
+    zero_padding: 68
+    normalization: 1/sqrt(170)
+  dmrs_gen:
+    output_shape: [2, 896]
+    valid_per_dmrs_symbol: 798
+    insertion_stage: host_tx_chain_merge_dmrs
+    destination_symbols: [2, 11]
+    destination_subcarriers: "2*k for k in [0,797]"
+    odd_subcarriers_zero: true
+    padding_zero: true
+
+downstream_contract:
+  ofdm_mod:
+    input_shape: [14, 32, 64]
+    flat_shape: [14, 2048]
+    layout: raw_stage4_k1_k2
+    natural_bin_formula: "n = k1 + 32*k2"
+    flat_offset_formula: "m = 64*(n mod 32) + floor(n/32)"
+
+algorithm:
+  family: resource_element_mapping
+  implementation: ascendc_inverse_gather_pure_permutation
+  fft_size: 2048
+  symbols_per_slot: 14
+  resource_blocks: 133
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+  left_guard_bins: 226
+  right_guard_bins: 226
+  dc_null: false
+  dc_guard_status: current_source_verified_final_resource_grid_confirmation_pending
+  used_natural_bins: "[1250..2047, 0, 1..797]"
+  mixed_radix_p: 32
+  mixed_radix_q: 64
+  natural_bin_to_raw_element: "64 * (n % 32) + floor(n / 32)"
+  inverse_gather_formula: "inv[element(u)] = u; otherwise inv[m] = 1664"
+  gather_offset_unit: byte
+  zero_slot_element: 1664
+  zero_slot_byte_offset: 3328
+  guard_output_positions: 452
+  arithmetic: none
+
+execution:
+  batch_parameter: fixed_one_slot
+  block_dim: 4
+  symbols_per_core: 4
+  symbol_assignment: contiguous_4_4_4_2
+  gather_calls_per_slot: 28
+  index_loaded_once_per_core: true
+  source_elements_per_gather: 1664
+  source_ub_elements: 1680
+  destination_elements_per_gather: 2048
+  ub_buffers_bytes:
+    source: 3360
+    destination: 4096
+    index: 8192
+    total: 15648
+  workspace_used_by_kernel: false
+  tiling_used_by_kernel: false
+
+commands:
+  generate: python3 scripts/re_map_ref.py
+  run_default: bash run.sh -r npu -v Ascend310P3
+  run_ascend310p1: bash run.sh -r npu -v Ascend310P1
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  reference: numpy_inverse_gather_reference
+  comparison: bit_exact_per_element
+  absolute_tolerance: 0
+  required_symbols_passed: 14
+  success_pattern: "[verify] ========== PASS (14/14) =========="
+  clean_migration_validation: static_ast_yaml_and_numpy_round_trip_only
+  npu_relaunched_during_migration: false
+  source_saved_artifacts:
+    status: observed_cmp_equal_re_and_im
+  index_formula_check:
+    status: verified
+    entries: 2048
+    used_source_entries: 1596
+    guard_entries: 452
+    guard_value_bytes: 3328
+    stored_source_index_matches_formula: true
+  map_demap_round_trip:
+    status: verified
+    valid_fp16_elements: 22344
+    valid_region: "[14,1596]"
+    full_padded_1664_identity: false
+    padding_reason: re_demap_padding_copies_raw_grid_element_zero
+
+performance:
+  status: historical_needs_clean_rebenchmark
+  measurement_scope: host_clock_kernel_launch_plus_stream_synchronize
+  warmup_runs: 10
+  timed_runs: 50
+  msprof_available: false
+  historical_ascend310p3:
+    correctness: pass_14_of_14_bit_exact
+    min_us: 28.5
+    avg_us: 46.9
+    p50_us: 29.1
+    p99_us: 372.8
+    max_us: 372.8
+
+migration:
+  mode: whitelist_copy_preserve_original
+  source_files:
+    - CMakeLists.txt
+    - cmake/cpu_lib.cmake
+    - cmake/npu_lib.cmake
+    - data_utils.h
+    - main.cpp
+    - re_map.h
+    - re_map_kernel.cpp
+    - run.sh
+    - scripts/re_map_ref.py
+    - scripts/verify_result.py
+  source_sha256:
+    CMakeLists.txt: 59a4608e309b34691d764f61d2463dca8b2522f26bc033f71cbfe6a594c5efb1
+    cmake/cpu_lib.cmake: 8c99e2531dc13a61fae27da68418718fbeec840b7a57ff87875675d37903aef3
+    cmake/npu_lib.cmake: 4a15964dfe891ece771eb6a17eec51b6cde47bd332e8551a1ac5a48eec8d8124
+    data_utils.h: 9019d245d14c4366c6f0e5615d7fb2455f616e76d4df21f5f696f7b1f31ad60f
+    main.cpp: 8a9da9251de9699d4ed3b7a26127da1ce929298d5971bfac0a6e917452cfb157
+    re_map.h: 912ede1a71b72d71680b9ae340dbab17f16cc4fd58df3b16ec021318c82a8d5d
+    re_map_kernel.cpp: 6bd14fef1c6dcf4168702fd06ce5bd0e5c1d227e33300777cbf40ee7a0484ca6
+    run.sh: c67b1bd6e26bee1d4b8db5e68a394dcba35be7e3f07dbd365232e59b6ba5249a
+    scripts/re_map_ref.py: 3e346a513745f243743daaecb65b03b3aaa616f6a78a0a323ceacb7ff672dbc7
+    scripts/verify_result.py: 70619ceccc9810f102b48953c64e98d34164e787877b09408ea22af4df5d0339
+  download_attachments:
+    classification: duplicate_current_source_copies_not_patches
+    compared_files:
+      - re_map.h
+      - re_map_kernel.cpp
+      - re_map_ref.py
+    all_cmp_equal: true
+    applied_to_source: false
+  excluded:
+    - build/**
+    - out/**
+    - auto_gen/**
+    - data/**/*.bin
+    - weights/**/*.bin
+    - profiling/**
+    - cache/**
+    - "**/__pycache__/**"
+    - "*.pyc"
+    - "*.o"
+    - "*.so"
+    - "*.a"
+    - "*.zip"
+    - "*.tar*"
+
+known_limitations:
+  - unresolved_duplicate_T10_id_with_precode_zf
+  - fixed_14_symbols_fft2048_133rb_geometry
+  - used_subcarrier_dc_and_guard_contract_needs_final_resource_grid_confirmation
+  - coupled_to_ofdm_raw_stage4_k1_k2_layout
+  - padded_input_region_is_ignored_and_not_round_trip_recoverable
+  - generated_scatter_table_can_be_stale_because_run_sh_only_checks_file_existence
+  - workspace_and_tiling_are_unused_dummy_abi_parameters
+  - host_acl_error_macro_logs_but_does_not_abort
+  - current_tx_chain_dmrs_merge_runs_on_host
+  - no_clean_npu_revalidation
+  - no_msprof_data
+
+next_tasks:
+  - resolve_global_TX_operator_ID_registry_without_silently_overwriting_either_T10
+  - confirm_used_subcarrier_mapping_against_final_sionna_or_air_interface_resource_grid
+  - rerun_clean_correctness_on_ascend310p3_and_bind_environment_and_source_hash
+  - optionally_validate_on_ascend310p1
+  - make_generated_index_invalidation_configuration_or_hash_aware
+  - move_dmrs_merge_on_device_only_if_chain_profiling_justifies_it
+  - collect_msprof_only_if_chain_profiling_shows_re_map_is_a_bottleneck

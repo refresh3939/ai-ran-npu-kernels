@@ -1,0 +1,95 @@
+schema_version: 1
+
+id: PUSCH_CODEBOOK_PRECODE
+name: pusch_codebook_precode
+aliases: [pusch_tpmi_precode]
+category: mimo
+domain: mimo
+chain: tx
+physical_channel: pusch
+spatial_mode: runtime_rank_and_tx_ports
+status: implemented_device_verified
+runtime_profile_integration: loopback_wrapper_common_abi_rank_ports_tpmi_prg
+
+paths:
+  source: kernels/mimo/pusch_codebook_precode
+  shared_types: kernels/common/pusch_mimo_types.h
+  abi_document: docs/MIMO_UPLINK_OPERATOR_ABI.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  public_api: [RuntimeInit, Launch, RuntimeDestroy]
+  config: PuschMimoConfig
+  complex_representation: separate_real_imag_fp16_planes
+  inputs:
+    - {name: layer_grid_re, dtype: float16, shape: [L, 14, 1664], layout: layer_symbol_natural_sc}
+    - {name: layer_grid_im, dtype: float16, shape: [L, 14, 1664], layout: layer_symbol_natural_sc}
+  outputs:
+    - {name: port_grid_re, dtype: float16, shape: [P, 14, 1664], layout: port_symbol_natural_sc}
+    - {name: port_grid_im, dtype: float16, shape: [P, 14, 1664], layout: port_symbol_natural_sc}
+  runtime_geometry:
+    num_layers: "config.num_layers in [1,4]"
+    num_tx_ports: "config.num_tx_ports in {1,2,4}"
+    constraint: "L <= P"
+  valid_subcarriers: "[0,1596)"
+  output_padding_contract: "[1596,1664) is positive zero"
+  adapter_owned_resources: [weight_re, weight_im, prg_of_rb, tiling]
+
+codebook:
+  standard: "3GPP TS 38.211 section 6.3.1.5, transform precoding disabled"
+  supported_tpmi_counts:
+    P1_L1: 1
+    P2_L1: 6
+    P2_L2: 3
+    P4_L1: 28
+    P4_L2: 22
+    P4_L3: 7
+    P4_L4: 5
+  prg_size_rb: "1..133"
+  identity_bypass: "codebook_enabled=0 requires P=L; TPMI is ignored"
+
+integration:
+  upstream:
+    operator: mimo_resource_grid_map
+    tensor: "layer_grid_re/im fp16 [L,14,1664]"
+    shared_runtime_fields: [num_layers, num_tx_ports]
+  downstream:
+    operator: re_map_batch
+    tensor: "port_grid_re/im fp16 [P,14,1664]"
+    batch_parameter: config.num_tx_ports
+  no_reorder_between_adjacent_operators: true
+
+execution:
+  block_dim: 8
+  scheduling: ofdm_symbol_jobs
+  stream_synchronize_in_wrapper: false
+  config_cache:
+    policy: lru
+    capacity: 16
+    key: [num_layers, num_tx_ports, tpmi, prg_size_rb, codebook_enabled]
+  coefficient_fast_paths: [zero_skip, pure_real_axpy, pure_imag_axpy]
+
+commands:
+  run: bash run.sh
+  host_contracts:
+    - /tmp/pusch_codebook_precode_host_test
+    - /tmp/pusch_codebook_precode_adjacent_contract_test
+  detector_contract: python3 scripts/test_mimo_detect_chain.py
+
+correctness:
+  host_codebook_all_standard_tpmi: pass
+  adjacent_operator_contract: pass
+  detector_64x16_mixed_rank_contract: pass
+  npu_cases: 8
+  npu_padding_zero: pass
+  runtime_cache: "five configurations including identity bypass; pass on last available NPU run"
+
+known_limitations:
+  - fixed_14_symbols_133rb_1596_used_1664_padded_geometry
+  - transform_precoding_not_supported
+  - maximum_four_tx_ports_in_v1
+  - rel18_eight_port_codebook_not_supported

@@ -1,0 +1,93 @@
+schema_version: 1
+
+id: mimo_data_extract
+name: mimo_data_extract
+category: mapping
+domain: mapping
+chain: rx_optional_compatibility
+status: implemented_device_build_pass_host_verified_npu_revalidation_pending
+
+paths:
+  source: kernels/mapping/mimo_data_extract
+  knowledge: kernels/mapping/mimo_data_extract/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  public_args: MimoDataExtractOpArgsV1
+  shared_types: kernels/common/pusch_mimo_types.h
+  inputs:
+    - {name: xhat_re, dtype: float16, shape: [L, 14, 1664], layout: full_grid_fp16}
+    - {name: xhat_im, dtype: float16, shape: [L, 14, 1664], layout: full_grid_fp16}
+    - {name: no_eff, dtype: float16, shape: [L, 14, 1664], layout: full_grid_fp16}
+  outputs:
+    - {name: data_re, dtype: float16, shape: [L, 19200], layout: compact_data_fp16}
+    - {name: data_im, dtype: float16, shape: [L, 19200], layout: compact_data_fp16}
+    - {name: data_no_eff, dtype: float16, shape: [L, 19200], layout: compact_data_fp16}
+  input_layout_tag: TENSOR_LAYOUT_FULL_GRID_FP16
+  output_layout_tag: TENSOR_LAYOUT_COMPACT_DATA_FP16
+  valid_elements_per_layer: 19152
+  output_tail_contract: "[19152,19200) is explicit positive zero"
+
+chain_contract:
+  canonical_chain_member: false
+  role: optional_compatibility_export
+  canonical_rx_path:
+    - mimo_detect
+    - qam_demod_256_batch
+    - layer_demap
+  forbidden_direct_consumers:
+    - name: qam_demod_256_batch
+      reason: expects_full_grid_L_14_1664_not_compact_L_19200
+  compatible_consumer_layout: compact_data_fp16_only
+  runtime_guard: ValidateConsumerLayout
+
+algorithm:
+  family: resource_element_compaction
+  ordering: symbol_major_subcarrier_minor
+  dmrs_selection: skip_config_dmrs_symbol_mask
+  symbols_per_slot: 14
+  data_symbols: 12
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+
+execution:
+  block_dim: 4
+  scheduling: one_layer_per_aiv
+  compact_group_symbols: 4
+  compact_group_elements: 6384
+  inter_core_sync: none
+  kernel_launches_per_slot: 1
+
+commands:
+  generate: python3 scripts/gen_data.py
+  run: bash run.sh -r npu -v Ascend310P3
+  host_contract: HOST_CONTRACT_ONLY=1 ./out/bin/ascendc_kernels_bbit
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  comparison: fp16_bit_exact
+  tested_layers: [1, 2, 3, 4]
+  tested_dmrs_masks: [0x0804, 0x2001, 0x1002]
+  host_contract_test: required
+  tensor_layout_miswire_rejection: required
+  output_tail_zero: required
+  current_validation:
+    date: 2026-09-07
+    device_build_ascend310p3: pass
+    host_profile_layout_reference_and_miswire_contract: pass
+    operator_yaml_parse: pass
+    npu_execution: pending_device_contention_drvret_4_acl_507008
+  prior_kernel_data_path_validation:
+    date: 2026-09-05
+    soc: Ascend310P3
+    result: rank1_to_rank4_fp16_bit_exact_and_tail_zero_pass
+
+known_limitations:
+  - not_consumable_by_current_qam_demod_256_batch
+  - not_a_canonical_rx_chain_stage
+  - fixed_14_symbol_133rb_geometry
+  - exactly_two_dmrs_symbols

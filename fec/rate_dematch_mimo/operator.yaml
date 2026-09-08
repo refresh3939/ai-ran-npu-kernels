@@ -1,0 +1,113 @@
+schema_version: 1
+
+id: rate_dematch_mimo
+name: rate_dematch_mimo
+category: fec
+domain: fec
+chain: rx
+spatial_mode: mimo
+status: npu_verified_ascend310p1
+
+paths:
+  source: kernels/fec/rate_dematch_mimo
+  knowledge: kernels/fec/rate_dematch_mimo/KNOWLEDGE.md
+  shared_abi: kernels/common/pusch_mimo_types.h
+
+target:
+  architecture: dav_m200
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interfaces:
+  input:
+    name: cw_llr
+    dtype: int16
+    q_format: Q11.5
+    shape: [N_SLOT, 8, L*19200]
+    layout: slot_canonical_nr_bit_compact_codeword
+    valid_prefix_per_plane_per_slot: L*19152
+    storage_tail_per_plane_per_slot: L*48
+    storage_tail_consumed: false
+  output:
+    name: ldpc_llr
+    dtype: int16
+    q_format: Q8.8
+    shape: [143, 26112]
+    layout: code_block_ldpc_position
+    punctured_prefix_zeros: 768
+  config_type: airan::PuschMimoConfig
+  layout_type: airan::PuschMimoLayout
+
+algorithm:
+  standard: 3gpp_ts_38_212_section_5_4_2_1
+  codewords: 1
+  layers: [1, 2, 3, 4]
+  slots: {min: 1, max: 23}
+  qm: 8
+  g_per_slot: 8*L*19152
+  g_total: N_SLOT*8*L*19152
+  base_graph: BG1
+  lifting_size: 384
+  code_blocks: 143
+  ldpc_n: 26112
+  punctured_prefix_2z: 768
+  circular_buffer_ncb: 25344
+  redundancy_version: 0
+  k0: 0
+  filler_supported: false
+  repetition_combining: true
+  harq_combining_across_launches: false
+  llr_scale: 8
+  llr_clip: 5120
+  descriptor_fields: [E, k0, Ncb, cw_symbol_offset]
+
+execution:
+  launches_per_codeword: 1
+  block_dim: 4
+  cb_assignment: cb_equals_aiv_id_plus_k_times_4
+  logical_aiv_mapping: get_block_idx_xor_2
+  inverse_interleave: eight_contiguous_canonical_bit_planes
+  gather_used: false
+  source_tile_elems: 8192
+  output_initialized_in_kernel: true
+  runtime_metadata_bytes: 128
+  descriptor_bytes: 2304
+  workspace_bytes: 128
+  ub_budget_lt_kib: 128
+
+contracts:
+  upstream: descramble_mimo
+  downstream: ldpc_decode
+  siso_parity:
+    rank: 1
+    slots: 23
+    e_distribution:
+      - {code_blocks: 87, e: 24640}
+      - {code_blocks: 56, e: 24648}
+
+verification:
+  host_reference: scripts/rate_dematch_ref.py
+  host_matrix: rank_1_to_4_times_slot_1_to_23
+  npu_matrix: rank_1_to_4_each_23_slots
+  comparison: elementwise_bit_exact_tol_0
+  tail_test: poisoned_storage_tail_invariance
+  run: bash run.sh -r npu -v Ascend310P1
+  clean_tree: temporary_build_data_output_removed_by_default
+  latest_result:
+    date: 2026-09-07
+    device: Ascend310P1
+    rank_1_23_slots: bit_exact_pass
+    rank_2_23_slots: bit_exact_pass_with_repetition
+    rank_3_23_slots: bit_exact_pass_with_repetition
+    rank_4_23_slots: bit_exact_pass_with_repetition
+    compared_elements_per_case: 3734016
+    warmup: 0
+    timed_runs: 1
+    performance_claim: none_single_sample_validation_only
+
+known_limitations:
+  - fixed_bg1_z384_c143_ncb25344_profile
+  - rv0_only
+  - no_filler_or_lbrm
+  - no_cross_launch_harq_combining
+  - downstream_ldpc_decode_is_fixed_143_cb

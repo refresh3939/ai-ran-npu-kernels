@@ -1,0 +1,162 @@
+schema_version: 1
+
+id: R0
+name: decimate
+category: sync
+domain: sample_rate_conversion
+chain: rx
+chain_position: layer_0_before_pss_sss_acquisition
+status: implemented
+knowledge_status: extracted_static_verified_needs_npu_revalidation
+
+paths:
+  source: kernels/sync/decimate
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/decimate
+  knowledge: kernels/sync/decimate/KNOWLEDGE.md
+  readme: kernels/sync/decimate/README.md
+  conversation: conversations/R0_decimate.md
+
+target:
+  architecture: dav_m200
+  default_soc: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_validated_soc: Ascend310P3
+  historical_cann_version: 8.0.0
+  migration_validation: static_only
+
+inputs:
+  - name: in_iq
+    dtype: int16
+    shape: [2457600]
+    logical_shape: [1228800, 2]
+    layout: interleaved_iq
+    sample_rate_hz: 61440000
+  - name: fir_taps
+    dtype: float16
+    shape: [96]
+    layout: tap_major
+
+outputs:
+  - name: out_iq
+    dtype: int16
+    shape: [307200]
+    logical_shape: [153600, 2]
+    layout: interleaved_iq
+    sample_rate_hz: 7680000
+
+algorithm:
+  family: fir_polyphase_decimator
+  decimation_factor: 8
+  input_complex_samples: 1228800
+  output_complex_samples: 153600
+  frame_duration_ms: 20
+  fir_taps: 96
+  phases: 8
+  taps_per_phase: 12
+  fir_window: kaiser
+  kaiser_beta: 8.0
+  cutoff_hz: 3840000
+  group_delay_input_samples: 47.5
+  boundary_condition: zero_for_negative_input_indices
+  accumulation_dtype: float16
+  coefficient_dtype: float16
+  implementation: gather_mask_residue_streams_plus_axpy
+
+execution:
+  batch: 1
+  batch_parameter: compile_time_fixed
+  block_dim: 4
+  output_per_core: 38400
+  output_tile: 1280
+  tiles_per_core: 30
+  input_per_tile: 10240
+  window_complex_samples: 10336
+  padded_load_complex_samples: 11264
+  max_copy_chunk_int16: 12288
+  engine: aiv_vector
+  tiling_mode: compile_time_constants
+  warmup_iterations: 5
+  timed_iterations: 20
+
+commands:
+  generate: python3 scripts/decimate_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  profile: bash run.sh -r npu -v Ascend310P3 -p
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  status: historical_device_pass_needs_clean_revalidation
+  reference: scipy_lfilter_fp64_then_downsample
+  polyphase_equivalence_tolerance: 1.0e-6
+  output_comparison: max_abs_error_per_iq_component
+  output_tolerance_lsb: 2
+  output_size_int16: 307200
+  antialias_test_min_rejection_db: 40
+  current_test_vectors: 1
+  coverage:
+    - deterministic_inband_and_two_out_of_band_tones
+    - deterministic_noise
+    - head_middle_tail_regions
+    - three_core_boundaries_plus_minus_four_samples
+  caveats:
+    - python_fp16sim_comment_does_not_match_current_half_accumulation
+    - historical_8_of_8_pass_claim_not_represented_by_current_verify_script
+
+performance:
+  status: historical_needs_revalidation
+  historical_environment:
+    soc: Ascend310P3
+    block_dim: 4
+  host_launch_and_sync_us:
+    min: 655.7
+    average: 763.9
+    p50: 750.5
+    max: 1011.2
+    warmup_iterations: 5
+    measured_iterations: 20
+  msprof_kernel_task_us: 569.334
+  msprof:
+    aicore_time_us: 568.37
+    vec_time_us: 450.998
+    vec_ratio: 0.793
+    scalar_time_us: 204.842
+    scalar_ratio: 0.36
+    mte2_time_us: 12.065
+    mte2_ratio: 0.021
+    mte3_time_us: 10.241
+    mte3_ratio: 0.018
+    mac_time_us: 0.0
+    mac_ratio: 0.0
+    memory_bound: 0.026
+    cube_utilization_percent: 0
+  bottleneck: vector
+  measurements_reproduced_after_migration: false
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - prof/**
+  - data/golden/*.bin
+  - data/ascend_output/*.bin
+  - weights/*.bin
+
+known_limitations:
+  - fixed_61_44_to_7_68_mhz_profile
+  - fixed_20_ms_frame_and_batch_one
+  - fixed_96_tap_kaiser_filter
+  - input_q_512_is_synthetic_test_scaling_not_real_usrp_contract
+  - filter_transition_band_is_weak_near_output_nyquist
+  - only_one_deterministic_current_test_vector
+  - ub_usage_is_close_to_256_kib_limit
+  - historical_performance_not_bound_to_git_commit_or_build_fingerprint
+  - stale_n_acc_and_fp32_comments_in_current_source
+
+next_tasks:
+  - align_source_comments_and_python_fp16_model_with_current_kernel
+  - rerun_generation_build_device_validation_and_msprof_in_clean_tree
+  - record_exact_cann_soc_git_commit_and_raw_logs
+  - validate_real_usrp_input_scaling_and_full_scale_behavior
+  - redesign_and_measure_full_filter_passband_transition_and_stopband
+  - add_random_impulse_boundary_full_scale_and_strong_adjacent_channel_tests

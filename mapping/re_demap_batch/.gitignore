@@ -1,0 +1,6 @@
+/build/
+/out/
+/data/
+/weights/
+__pycache__/
+*.pyc

@@ -1,0 +1,97 @@
+schema_version: 1
+
+id: layer_map_mimo
+name: layer_map_mimo
+aliases: [layer_map]
+category: mapping
+domain: mapping
+chain: tx
+spatial_mode: mimo_rank1_to_rank4
+status: implemented_host_contract_verified
+knowledge_status: extracted_and_contract_aligned
+runtime_profile_integration: common_abi_optional_env_fail_closed_before_acl_init
+
+paths:
+  source: kernels/mapping/layer_map_mimo
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/layer_map
+  knowledge: kernels/mapping/layer_map_mimo/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  public_args: LayerMapOpArgsV1
+  shared_types: common/pusch_mimo_types.h
+  producer: qam_mod_256_mimo
+  consumer: mimo_resource_grid_map
+  inputs:
+    - {name: d_re, dtype: float16, shape: [codeword_stride], layout: compact_symbol_major_layer_interleaved}
+    - {name: d_im, dtype: float16, shape: [codeword_stride], layout: compact_symbol_major_layer_interleaved}
+  outputs:
+    - {name: layer_re, dtype: float16, shape: [L, data_stride], layout: compact_layer_major}
+    - {name: layer_im, dtype: float16, shape: [L, data_stride], layout: compact_layer_major}
+  valid_input: "d_[0:L*19152)"
+  ignored_input_padding: "d_[L*19152:L*19200)"
+  valid_output_per_layer: "layer_[l,0:19152)"
+  zero_output_padding_per_layer: "layer_[l,19152:19200)"
+  qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+  stream_permutation: none
+
+layout:
+  num_data_symbols: 12
+  num_data_re_per_layer: 19152
+  data_stride: 19200
+  codeword_symbols: L*19152
+  codeword_stride: L*19200
+  shared_layout_fields_match:
+    - qam_mod_256_mimo
+    - mimo_resource_grid_map
+    - layer_demap
+
+algorithm:
+  family: nr_symbol_domain_layer_mapping
+  formula: "layer[l,i] = d[L*i+l]"
+  reversible_permutation: true
+  inverse_formula: "d[L*i+l] = layer[l,i]"
+  inverse_adapter_note: "compact [L,19200] must be repacked to physical [L,Qm,12,1600] before layer_demap"
+
+execution:
+  block_dim: 4
+  ownership: one_aiv_per_layer
+  rank1_path: direct_copy
+  rank2_to_rank4_path: gather
+  tile_symbols: 4096
+  output_tail_clear: explicit_positive_zero
+  workspace_used: false
+  tiling_bytes: 65664
+
+correctness:
+  comparison: fp16_bit_exact
+  host_contract:
+    ranks: [1, 2, 3, 4]
+    qam_mod_to_grid: pass
+    physical_layer_demap_inverse: pass
+    layer_tail_zero: pass
+    demap_output_tail_zero: pass
+    qam_stream_metadata: pass
+  npu_cases:
+    ranks: [1, 2, 3, 4]
+    status: pass_current_serial_revalidation
+    retained_outputs_verifier: pass
+    retained_outputs_timestamp: 2026-09-07T16:29:01+08:00
+    current_attempt:
+      date: 2026-09-08
+      soc: Ascend310P1
+      result: rank1_through_rank4_actual_npu_pass
+      verifier: fp16_bit_exact_and_demap_inverse_pass
+
+known_limitations:
+  - fixed_14_symbol_133rb_geometry
+  - fixed_two_dmrs_symbol_profile
+  - fixed_256qam
+  - single_codeword
+  - maximum_four_layers
+  - no_transform_precoding
+  - compact_tx_and_symbol_padded_rx_require_explicit_inverse_adapter

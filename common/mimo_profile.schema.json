@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airan.local/schemas/mimo-profile-v1.json",
+  "title": "AI-RAN MIMO profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_name",
+    "topology",
+    "spatial",
+    "waveform",
+    "channel",
+    "receiver"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile_name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architecture", "tx_antennas", "tx_rf_chains", "rx_antennas", "rx_rf_chains"],
+      "properties": {
+        "architecture": {"enum": ["full_digital", "hybrid", "analog"]},
+        "tx_antennas": {"type": "integer", "minimum": 1, "maximum": 64},
+        "tx_rf_chains": {"type": "integer", "minimum": 1, "maximum": 64},
+        "rx_antennas": {"type": "integer", "minimum": 1, "maximum": 64},
+        "rx_rf_chains": {"type": "integer", "minimum": 1, "maximum": 64}
+      }
+    },
+    "spatial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported_ranks", "port_policy", "precoding"],
+      "properties": {
+        "supported_ranks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1, "maximum": 16}
+        },
+        "port_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": {"enum": ["identity", "explicit"]},
+            "ports_by_rank": {
+              "type": "object",
+              "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
+              "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 64}
+            }
+          }
+        },
+        "precoding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default_mode"],
+          "properties": {
+            "default_mode": {"enum": ["bypass", "codebook", "non_codebook"]},
+            "by_rank": {
+              "type": "object",
+              "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["mode"],
+                "properties": {
+                  "mode": {"enum": ["bypass", "codebook", "non_codebook"]},
+                  "tpmi": {"type": "integer", "minimum": 0, "maximum": 65535},
+                  "prg_size_rb": {"type": "integer", "minimum": 1, "maximum": 275}
+                }
+              }
+            }
+          }
+        },
+        "antenna_mapping": {"type": "string", "minLength": 1}
+      }
+    },
+    "waveform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "qm", "num_symbols", "fft_size", "num_rb", "used_subcarriers",
+        "padded_subcarriers", "dmrs_symbols", "data_re_alignment", "qam_row_alignment"
+      ],
+      "properties": {
+        "qm": {"enum": [2, 4, 6, 8]},
+        "num_symbols": {"type": "integer", "minimum": 1, "maximum": 14},
+        "fft_size": {"type": "integer", "minimum": 128, "maximum": 4096},
+        "num_rb": {"type": "integer", "minimum": 1, "maximum": 275},
+        "rb_start": {"type": "integer", "minimum": 0, "maximum": 274},
+        "used_subcarriers": {"type": "integer", "minimum": 1, "maximum": 3300},
+        "padded_subcarriers": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "dmrs_symbols": {
+          "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0, "maximum": 13}
+        },
+        "data_re_alignment": {"type": "integer", "minimum": 1, "maximum": 4096},
+        "qam_row_alignment": {"type": "integer", "minimum": 1, "maximum": 4096}
+      }
+    },
+    "dmrs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ports_by_rank": {
+          "type": "object",
+          "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
+          "additionalProperties": {
+            "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+            "items": {"type": "integer", "minimum": 0, "maximum": 65535}
+          }
+        },
+        "symbol_mask": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "type": {"type": "integer", "minimum": 1, "maximum": 2},
+        "length": {"type": "integer", "minimum": 1, "maximum": 2},
+        "num_cdm_groups_without_data": {"type": "integer", "minimum": 1, "maximum": 3}
+      }
+    },
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "gain_by_rank", "awgn_std_int16"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1},
+        "gain_by_rank": {
+          "type": "object",
+          "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
+          "additionalProperties": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+        },
+        "awgn_std_int16": {"type": "number", "minimum": 0, "maximum": 200}
+      }
+    },
+    "receiver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel_estimator", "detector", "capacity", "buckets", "rx_capacity_adapter"],
+      "properties": {
+        "channel_estimator": {"type": "string", "minLength": 1},
+        "detector": {"type": "string", "minLength": 1},
+        "capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_rx_antennas", "max_layers"],
+          "properties": {
+            "max_rx_antennas": {"type": "integer", "minimum": 1, "maximum": 64},
+            "max_layers": {"type": "integer", "minimum": 1, "maximum": 16}
+          }
+        },
+        "buckets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rx_antennas", "layers"],
+          "properties": {
+            "rx_antennas": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": {"type": "integer", "minimum": 1, "maximum": 64}
+            },
+            "layers": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": {"type": "integer", "minimum": 1, "maximum": 16}
+            }
+          }
+        },
+        "rx_capacity_adapter": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

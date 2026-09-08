@@ -1,0 +1,210 @@
+schema_version: 1
+
+id: T10
+name: pdsch_zf_precode
+aliases: [precode_zf]
+category: mimo
+chain: tx
+physical_channel: pdsch
+spatial_mode: mimo
+status: final_verified
+knowledge_status: source_audited_conversation_reconciled
+
+paths:
+  source: kernels/mimo/pdsch_zf_precode
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/precode_zf
+  final_working_source: /home/refresh/AI-RAN-NPU/kernels/tx/precode_zf_mimo_detect_opt
+  knowledge: kernels/mimo/pdsch_zf_precode/KNOWLEDGE.md
+  conversation: conversations/T10_precode_zf.md
+
+target:
+  architecture: dav_m200
+  soc: Ascend310P1
+  compatible_soc:
+    - Ascend310P3
+  cann:
+    verified_version: 8.0.0
+    toolkit_path: /usr/local/Ascend/ascend-toolkit/latest
+
+io:
+  complex_representation: separate_real_imag_fp16_planes
+  inputs:
+    - name: w_re
+      dtype: float16
+      shape: "[N_UNIT, NT, NL]"
+      semantics: "real(W), W=transpose(H), RE-major"
+    - name: w_im
+      dtype: float16
+      shape: "[N_UNIT, NT, NL]"
+      semantics: "imag(W), W=transpose(H), RE-major"
+    - name: s_re
+      dtype: float16
+      shape: "[N_UNIT, NL]"
+      semantics: real_layer_symbols
+    - name: s_im
+      dtype: float16
+      shape: "[N_UNIT, NL]"
+      semantics: imag_layer_symbols
+    - name: mask
+      dtype: float16
+      shape: "[N_RE]"
+      semantics: used_RE_indicator_currently_ignored_by_kernel
+  outputs:
+    - name: x_re
+      dtype: float16
+      shape: "[NT, N_RE]"
+      semantics: real_antenna_domain_symbols
+    - name: x_im
+      dtype: float16
+      shape: "[NT, N_RE]"
+      semantics: imag_antenna_domain_symbols
+  default_shape:
+    N_SYMBOL: 14
+    N_SC_PAD: 1664
+    N_RE: 23296
+    NT: 64
+    NL: 16
+    NLR: 16
+    PACK: 1
+    N_UNIT: 23296
+
+algorithm:
+  family: zero_forcing_precoding
+  reference: "G=normalize_columns(H^H*(H*H^H)^-1); x=G*s"
+  implementation: epsilon_loaded_block_neumann_richardson
+  gram: "A_epsilon=H*H^H+epsilon*I"
+  epsilon: 0.001
+  block_inverse_size: 8
+  neumann_polynomial: "I+E+E^2+E^3"
+  neumann_multiplications: 2
+  richardson_iterations: 5
+  richardson_form: "C=I-M^-1*A; X=M^-1+C*X"
+  normalization: "s_hat=s/sqrt(max(real(diag(X)),epsilon))"
+  projection: "u=X*s_hat; x=H^H*u"
+  per_re_independent: true
+  cross_re_channel_sharing: false
+  empirical_amplitude_compensation: false
+  explicit_G_materialized: false
+
+execution:
+  block_dim: 4
+  core_partition: contiguous
+  group_batch: 8
+  scheduling_re_batch: 5824
+  output_batch: 64
+  l1_ring_depth: 2
+  block_inverse: 8
+  parameter_binding: compile_time_header_rewritten_by_run_sh
+  engines:
+    gram_and_matrix_products: Cube
+    elementwise_normalization_and_layout: Vector
+  buffers:
+    gram_and_bri_share_l0c: true
+    richardson_left_operand_resident_l0a: true
+    output_staged_in_ub: true
+    intermediate_G_written_to_gm: false
+
+commands:
+  generate: "NT=64 NL=16 NLR=16 AIRAN_SCPAD_SET=1664 python3 scripts/precode_zf_ref.py"
+  run: "bash run.sh -r npu -v Ascend310P1"
+  benchmark_100: "AIRAN_WARMUP=5 AIRAN_TIMED=100 bash run.sh -r npu -v Ascend310P1"
+  verify: "NT=64 NL=16 NLR=16 PACK=0 AIRAN_SCPAD=1664 AIRAN_DATA_DIR=$PWD python3 scripts/verify_result.py"
+  pack_example: "NLR=4 PACK=1 AIRAN_SCPAD_SET=256 RE_BATCH=16 bash run.sh -r npu -v Ascend310P1"
+  shell_syntax: "bash -n run.sh"
+  python_syntax: "AST parse scripts/*.py without writing pyc"
+
+correctness:
+  standard: normalized_rms_evm_against_exact_zf_golden
+  threshold: "EVM < 0.05"
+  full_case:
+    status: verified
+    date: 2026-09-03
+    evm_percent: 1.86
+    per_antenna_evm_percent_min: 1.77
+    per_antenna_evm_percent_max: 1.96
+    golden_mean_power: 0.2503
+    npu_mean_power: 0.2476
+  reference_script: scripts/precode_zf_ref.py
+  verifier: scripts/verify_result.py
+  optional_crosscheck: Sionna_rzf_precoding_matrix_alpha_0
+
+performance:
+  status: verified
+  date: 2026-09-03
+  configuration: "Ascend310P1, NT=64, NL=NLR=16, N_RE=23296, blockDim=4"
+  benchmark:
+    warmup: 5
+    timed_iterations: 100
+    independent_p50_ms:
+      - 8.669
+      - 8.670
+  speedup_vs_21_413_ms_baseline: 2.47
+  msprof:
+    host_ms: 8.587
+    task_ms: 8.393
+    aicore_ms: 8.384
+    vector_ms: 3.507
+    scalar_ms: 1.633
+    mac_ms: 2.132
+    mte1_ms: 1.107
+    mte2_ms: 0.522
+    mte3_ms: 0.518
+    memory_bound: 0.148
+    cube_utilization_percent: 39.958
+  target_5ms:
+    status: rejected_under_strict_accuracy_constraints
+    reason: requires_cross_re_sharing_or_iteration_reduction_and_increases_evm
+
+rejected_experiments:
+  - name: vector_richardson_with_diagonal_estimate
+    p50_ms: 8.02
+    evm_percent: 2.92
+    reason: changes_original_accuracy
+  - name: adjacent_re_share_x_richardson_5
+    p50_ms: 5.77
+    evm_percent: 2.13
+    reason: adds_cross_re_channel_assumption
+  - name: adjacent_re_share_x_richardson_4
+    p50_ms:
+      - 5.548
+      - 5.444
+    evm_percent: 3.47
+    reason: changes_original_accuracy
+  - name: adjacent_re_share_x_richardson_3_pair_xs
+    p50_ms: 5.019
+    evm_percent: 4.83
+    reason: iteration_reduction_and_empirical_amplitude_compensation
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**
+  - data/ascend_output/**
+  - prof/**
+  - prof_*/**
+  - profiling/**
+  - "*.bin"
+  - "*.o"
+  - "*.so"
+  - "*.zip"
+  - "**/__pycache__/**"
+
+known_limitations:
+  - NL_must_equal_16
+  - NT_must_be_a_multiple_of_16_and_at_most_255
+  - parameters_are_compile_time_and_run_sh_rewrites_header
+  - mask_input_is_not_consumed_by_kernel
+  - performance_is_verified_only_for_the_default_full_case
+  - synthetic_correlated_channel_only
+  - no_real_channel_or_ber_bler_validation
+  - cann_path_uses_latest_symlink
+  - operator_not_integrated_into_tx_chain
+  - strict_5ms_target_not_achieved
+
+next_tasks:
+  - pin_CANN_firmware_and_device_frequency_in_reproducibility_metadata
+  - replace_header_rewrite_with_tiling_or_generated_configuration
+  - add_ill_conditioned_real_channel_and_ber_bler_tests
+  - integrate_CSI_and_precoder_contract_into_tx_chain
+  - investigate_nonredundant_block_diagonal_Cube_microkernel_for_strict_5ms

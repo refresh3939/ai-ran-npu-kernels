@@ -1,0 +1,32 @@
+{
+  "schema": "airan.pusch_mimo.tx_chain.acceptance.v1",
+  "date": "2026-09-08",
+  "soc": "Ascend310P1",
+  "status": "PASS",
+  "build": {
+    "host_executable": "pusch_mimo_tx_chain",
+    "device_image": "libascendc_kernels_npu.so",
+    "kernel_count": 10,
+    "single_acl_context": true,
+    "stream_count": 1,
+    "shared_device_arena": true,
+    "intermediate_host_files": false
+  },
+  "one_slot_smoke": [
+    {"rank": 1, "tx_ports": 1, "output_bytes": 122880, "nonzero_i16": 61412, "saturated_i16": 0, "elapsed_ms": 1.868300, "status": "PASS"},
+    {"rank": 2, "tx_ports": 2, "output_bytes": 245760, "nonzero_i16": 122842, "saturated_i16": 0, "elapsed_ms": 2.088000, "status": "PASS"},
+    {"rank": 3, "tx_ports": 4, "output_bytes": 491520, "nonzero_i16": 245550, "saturated_i16": 0, "elapsed_ms": 2.827000, "status": "PASS"},
+    {"rank": 4, "tx_ports": 4, "output_bytes": 491520, "nonzero_i16": 245637, "saturated_i16": 0, "elapsed_ms": 2.832000, "status": "PASS"}
+  ],
+  "full_transport_smoke": {
+    "rank": 4,
+    "tx_ports": 4,
+    "slots": 23,
+    "output_bytes": 11304960,
+    "nonzero_i16": 5649932,
+    "saturated_i16": 0,
+    "elapsed_ms": 32.189477,
+    "status": "PASS"
+  },
+  "scope": "Fused TX execution topology and waveform sanity; coded BER is covered by pusch_mimo_loopback evidence."
+}

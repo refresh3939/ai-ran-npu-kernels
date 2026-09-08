@@ -1,0 +1,242 @@
+schema_version: 1
+
+id: R10
+name: descramble_siso
+aliases: [descramble]
+category: fec
+domain: fec
+chain: rx
+spatial_mode: siso
+status: padded_qam_abi_aligned_ascend310p1_verified
+knowledge_status: current_source_chain_and_reference_aligned
+
+paths:
+  source: kernels/fec/descramble_siso
+  origin: /home/refresh/AI-RAN-NPU/kernels/rx/descramble
+  knowledge: kernels/fec/descramble_siso/KNOWLEDGE.md
+  conversation_markdown: conversations/R10_descramble_rate_dematch.md
+  conversation_complete_json: conversations/R10_descramble_rate_dematch_complete.json
+  historical_handoff: docs/history/R10_descramble/HANDOFF_descramble_rate_dematch.md
+
+id_provenance:
+  status: VERIFIED
+  evidence:
+    - path: /home/refresh/AI-RAN-NPU/SKILLV1.md
+      claim: RX_operator_table_maps_R10_to_descrambling
+    - path: /home/refresh/AI-RAN-NPU/rx_chain_derivation.md
+      claim: section_R10_is_descrambling
+    - path: kernels/mapping/qam_demod_256_siso/operator.yaml
+      claim: upstream_operator_is_R9
+    - path: kernels/fec/rate_dematch_siso/operator.yaml
+      claim: downstream_operator_is_R11
+  conflict: none_found
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+  exact_cann_version_for_current_source: unknown_not_rechecked
+
+interfaces:
+  inputs:
+    - name: llr_in_gm
+      dtype: int16
+      q_format: Q11.5
+      physical_shape: [23, 8, 12, 1600]
+      allocation_shape: [23, 8, 19200]
+      layout: slot_qam_stream_data_symbol_subcarrier
+      valid_subcarriers_per_symbol: 1596
+      padding_subcarriers_per_symbol: 4
+      padding_value: 0
+      qam_stream_order: [I_b3, I_b2, I_b1, I_b0, Q_b3, Q_b2, Q_b1, Q_b0]
+      qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+      llr_polarity: positive_means_bit_0
+      upstream_clip_integer: [-2560, 2560]
+    - name: sign_gm
+      dtype: int16
+      shape: [23, 8, 19200]
+      layout: slot_nr_bit_compact_re
+      value_domain: [-1, 1]
+      exact_values: [-1, 1]
+      valid_re_per_stream_per_slot: 19152
+      padding_value: 1
+    - name: n_slot_gm
+      dtype: int32
+      shape: [16]
+      used_elements: [0]
+      valid_runtime_range: [0, 23]
+      out_of_range_policy: clamp_to_23
+    - name: workspace
+      dtype: opaque_gm
+      used: false
+      purpose: combined_build_launch_abi_tail
+    - name: tiling
+      dtype: opaque_gm
+      size_bytes: 128
+      used: false
+      purpose: combined_build_launch_abi_tail
+  outputs:
+    - name: llr_out_gm
+      dtype: int16
+      q_format: Q11.5
+      shape: [23, 8, 19200]
+      layout: slot_nr_bit_compact_re
+      stream_order: canonical_nr_bit_0_through_7
+      valid_re_per_stream_per_slot: 19152
+      padding_re_per_stream_per_slot: 48
+      padding_value: 0
+
+algorithm:
+  family: 5g_nr_data_descrambling
+  source_standard_claim: 3gpp_ts_38_211_section_6_3_1_1
+  operation: fused_qam_symbol_padding_removal_stream_permutation_and_sign_multiply
+  sign_definition: sign_equals_1_minus_2c
+  gold_nc: 1600
+  c_init_formula: "((n_RNTI & 0xffff) << 15) | ((q & 1) << 14) | (N_ID_cell & 0x3ff)"
+  current_rx_chain_parameters:
+    n_RNTI: 12345
+    q: 0
+    N_ID_cell: SyncState.cell_id
+  qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+  nr_bit_to_qam_stream: [0, 4, 1, 5, 2, 6, 3, 7]
+  gold_generation_extent: valid_23_by_19152_by_8_excluding_storage_padding
+  gold_reset_policy: one_continuous_sequence_for_full_transport_block_buffer
+  qam_symbol_padding_compacted_by_kernel: true
+  stream_permutation_performed_by_kernel: true
+  code_block_segmentation_performed_by_kernel: false
+  q_format_conversion_performed_by_kernel: false
+
+chain_contract:
+  configured_position: qam256_demod_to_descramble_to_rate_dematch
+  actual_active_upstream: qam256_demod
+  llr_assemble_status: inactive_not_identity_for_padded_qam_abi
+  adapter_location: fused_into_descramble
+  downstream: rate_dematch
+  downstream_q_conversion: multiply_by_8_from_Q11_5_to_Q8_8
+  downstream_padding_policy: consume_only_first_19152_and_skip_48_padding_per_stream_slot
+
+execution:
+  batch_scope: one_transport_block
+  runtime_batch_parameter: n_slot_gm_element_0
+  maximum_slots: 23
+  block_dim: 4
+  logical_aiv_mapping: get_block_idx_xor_2
+  partition_axis: canonical_nr_bit_stream
+  nr_bit_streams_per_aiv: 2
+  compact_adds_calls_per_stream: 12
+  compact_adds_valid_elements_per_symbol: 1596
+  compact_adds_issued_elements_per_call: 1664
+  compact_adds_mask_lanes: 128
+  compact_adds_repeat_count: 13
+  input_vector_guard_elements: 64
+  output_vector_guard_elements: 80
+  sign_mul_calls_per_stream: 1
+  sign_mul_elements_per_call: 19200
+  sign_mul_mask_lanes: 128
+  sign_mul_repeat_count: 150
+  ub_bytes_per_aiv: 115552
+  runtime_tiling_used: false
+  workspace_used: false
+
+commands:
+  working_directory: kernels/fec/descramble_siso
+  shell_syntax_check: bash -n run.sh
+  python_syntax_check: python3_ast_parse_python_descramble_ref_py
+  reference_entry: python3 python/descramble_ref.py
+  npu_310p1: bash run.sh -r npu -v Ascend310P1
+  npu_310p3: bash run.sh -r npu -v Ascend310P3
+  npu_run_status: verified_on_Ascend310P1
+  reference_entry_note: generates_padded_qam_input_and_compact_nr_bit_output
+
+correctness:
+  reference: python/descramble_ref.py
+  expected_comparison: elementwise_bit_exact
+  tolerance: 0
+  current_migration_file_cmp_status: intentionally_diverged_for_qam_abi_alignment
+  current_lightweight_reference_status: VERIFIED
+  current_npu_status: Ascend310P1_bit_exact_zero_of_3532800_errors
+  historical_npu_status: old_geometry_bit_exact_pass
+  historical_geometry:
+    n_slot: 41
+    n_sym: 10960
+    n_sym_pad: 11264
+
+performance:
+  status: verified_optimized_on_Ascend310P1_standalone_host_clock
+  metric_scope: kernel_latency_per_slot_derived_from_one_transport_block_launch
+  historical_result_us_per_slot: [6.4, 6.6]
+  current_geometry_measurement:
+    soc: Ascend310P1
+    warmup_launches_per_process: 1
+    timed_launches_per_process: 1000
+    process_runs: 5
+    per_tb_ms: [0.196, 0.198, 0.195, 0.198, 0.196]
+    per_slot_us: [8.52, 8.62, 8.47, 8.62, 8.53]
+    median_per_tb_ms: 0.196
+    median_per_slot_us: 8.53
+    min_per_slot_us: 8.47
+    max_per_slot_us: 8.62
+    correctness_each_run: bit_exact_zero_of_3532800_errors
+    pre_optimization_same_method_per_slot_us: [8.86, 8.91, 8.86, 8.86, 8.88]
+    pre_optimization_median_per_slot_us: 8.86
+    improvement_percent_from_medians: 3.7
+    optimization: fixed_128_lane_mask_with_ub_guard
+  expected_direction_for_qam_plus_descramble: likely_shorter_than_legacy_qam_compact_plus_descramble
+  profiler_status: no_msprof_artifact_archived_for_current_migration
+
+evidence_status:
+  VERIFIED:
+    - current_source_interface_and_kernel_math
+    - current_rx_chain_launch_order
+    - padded_qam_input_contract
+    - fused_padding_removal_and_inverse_stream_permutation
+    - rate_dematch_padding_skip_and_Q_scale_times_8
+    - gold_excludes_storage_padding
+    - op_id_R10_without_conflict
+    - migration_cmp_hash_shell_ast_yaml_and_forbidden_artifact_scan
+    - Ascend310P1_standalone_bit_exact_and_1000_launch_five_run_timing
+  OBSERVED:
+    - tx_chain_still_requires_independent_end_to_end_contract_reconciliation
+  HISTORICAL:
+    - old_geometry_NPU_bit_exact_and_6_4_to_6_6_us_per_slot
+    - workspace_tiling_tail_fix_resolved_507015_in_combined_chain
+  REJECTED:
+    - 41_slot_11264_pad_contract_as_current
+    - RE_major_descramble_output
+    - descramble_performs_8_to_1_transpose
+    - Q11_5_to_Q8_8_divide_by_8
+    - namespace_pollution_or_int16_mul_as_final_507015_root_cause
+    - slower_direct_mul_pair_prefetch_and_gather_optimization_candidates
+    - non_bit_exact_double_buffer_pipeline_candidate
+  STALE:
+    - llr_assemble_launch_required_for_current_23_slot_geometry
+    - compact_qam_input_contract
+    - gold_advances_through_48_padding_elements_per_slot
+
+generated_artifacts_excluded:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - profiling/**
+  - cache/**
+  - test_data/*.bin
+  - python/test_data/*.bin
+  - "*.zip"
+  - "*.tar.gz"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+
+known_limitations:
+  - fixed_23_slot_8_stream_12_symbol_1600_input_geometry
+  - fixed_current_rx_chain_n_RNTI_12345_and_q_0
+  - sign_generation_is_host_side
+  - n_slot_less_than_23_leaves_unprocessed_output_slots_untouched
+  - Ascend310P3_and_full_chain_not_revalidated_after_alignment
+
+next_tasks:
+  - repeat_aligned_23_slot_standalone_validation_on_Ascend310P3
+  - validate_descramble_rate_dematch_ldpc_decode_with_nonzero_matched_and_mismatched_cell_id_vectors
+  - reconcile_tx_rate_match_scramble_qam_mod_nr_bit_order_for_full_loopback

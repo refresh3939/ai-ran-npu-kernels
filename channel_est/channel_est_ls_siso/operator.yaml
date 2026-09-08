@@ -1,0 +1,196 @@
+schema_version: 1
+
+id: R7
+name: channel_est_ls_siso
+aliases: [channel_est_ls]
+category: channel_est
+domain: channel_estimation
+chain: rx
+spatial_mode: siso
+status: implemented
+knowledge_status: extracted_current_source_checked_needs_device_rebenchmark
+
+paths:
+  source: kernels/channel_est/channel_est_ls_siso
+  origin_source: /home/refresh/AI-RAN-NPU/kernels/rx/channel_est_ls
+  knowledge: kernels/channel_est/channel_est_ls_siso/KNOWLEDGE.md
+  conversation: conversations/R7_channel_est_ls.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  default_soc_version: Ascend310P3
+  historical_cann_version: "8.0"
+  current_cann_path: /usr/local/Ascend/ascend-toolkit/latest
+  exact_current_cann_version: unknown
+
+interface:
+  batch: one_slot_per_launch
+  inputs:
+    - name: y_re
+      dtype: fp16
+      shape: [14, 1664]
+      layout: symbol_major_natural_sc
+      raw_sc: 1596
+    - name: y_im
+      dtype: fp16
+      shape: [14, 1664]
+      layout: symbol_major_natural_sc
+      raw_sc: 1596
+    - name: x_ref_re
+      dtype: fp16
+      shape: [2, 832]
+      layout: dmrs_symbol_major_comb2_re
+      raw_re_per_symbol: 798
+    - name: x_ref_im
+      dtype: fp16
+      shape: [2, 832]
+      layout: dmrs_symbol_major_comb2_re
+      raw_re_per_symbol: 798
+    - name: weave_idx
+      dtype: uint32
+      shape: [416]
+      layout: ub_byte_offsets
+  outputs:
+    - name: out_h_re
+      dtype: fp16
+      shape: [14, 1664]
+      layout: symbol_major_natural_sc
+    - name: out_h_im
+      dtype: fp16
+      shape: [14, 1664]
+      layout: symbol_major_natural_sc
+  host_only_artifacts:
+    - name: out_err_var
+      dtype: fp16
+      shape: [14, 1664]
+      semantics: copied_from_golden_not_computed_by_kernel
+  legacy_file_inputs:
+    input_bin:
+      dtype: cint16_q2_14
+      shape: [14, 1596]
+      layout: iq_interleaved
+    pilot_bin:
+      dtype: cint16_q2_14
+      shape: [2, 798]
+      layout: iq_interleaved
+
+algorithm:
+  family: least_squares_channel_estimation
+  implementation: ls_plus_frequency_and_time_linear_interpolation
+  nr_mode: siso_pusch_dmrs_type1_comb2
+  symbols_per_slot: 14
+  raw_subcarriers: 1596
+  padded_subcarriers: 1664
+  dmrs_symbols: [2, 11]
+  dmrs_subcarrier_parity: even
+  raw_dmrs_re_per_symbol: 798
+  padded_dmrs_re_per_symbol: 832
+  pilot_modulus_assumption: unit
+  frequency_boundary: zero_extended_padded_grid
+  time_alpha: "(symbol - 2) / 9"
+  smoothing: none
+  lmmse: false
+
+execution:
+  block_dim: 4
+  core_type: AIV
+  subcarriers_per_core: 416
+  dmrs_pairs_written_per_core: 208
+  dmrs_re_read_per_core_with_halo: 209
+  workspace_bytes_allocated_by_host: 4096
+  workspace_used_by_kernel: false
+  tiling_bytes: 128
+  tiling_mode: zero_placeholder
+  benchmark_warmup_runs: 10
+  benchmark_timed_runs: 50
+
+commands:
+  generate: python3 scripts/channel_est_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  reference: numpy_kernel_aligned_reference
+  independent_sionna_validation: not_done
+  comparison: fp16_output_vs_quantized_reference
+  existing_artifact_replay:
+    status: verified_5_of_5
+    replay_date: 2026-08-27
+    artifact_date: 2026-06-22
+    npu_relaunched_during_migration: false
+  cases:
+    - name: case_0_awgn_only
+      max_aggregate_mse: 0.001
+      max_abs_error: 0.05
+    - name: case_1_flat_fading
+      max_aggregate_mse: 0.001
+      max_abs_error: 0.05
+    - name: case_2_freq_selective
+      max_aggregate_mse: 0.005
+      max_abs_error: 0.10
+    - name: case_3_freq_time_var
+      max_aggregate_mse: 0.01
+      max_abs_error: 0.15
+    - name: case_4_low_snr
+      max_aggregate_mse: 1.0
+      max_abs_error: 3.0
+  err_var_check: host_round_trip_only
+
+performance:
+  status: historical_needs_rebenchmark
+  measurement_scope: host_clock_kernel_launch_plus_stream_synchronize
+  msprof_available: false
+  current_event_optimized_source_benchmark: unavailable
+  historical_v6_2_pre_event_optimization:
+    soc: Ascend310P3
+    min_us: 41.8
+    avg_us: 44.9
+    p50_us: 43.8
+    p99_us: 56.9
+    one_ms_slot_headroom: 22.8
+    source_status: stale_relative_to_current_event_sync_code
+  historical_v6_block_interleave:
+    p50_us: 33.3
+    source_status: stale_interface
+
+generated_artifacts:
+  - data/golden/**/*.bin
+  - data/ascend_output/**/*.bin
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - scripts/__pycache__/**
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+
+known_limitations:
+  - fixed_siso_single_port_single_layer
+  - fixed_14_symbols_and_1596_raw_subcarriers
+  - fixed_dmrs_symbols_2_and_11
+  - fixed_type1_comb2_even_subcarriers
+  - fixed_nid_nscid_slot_in_reference_generator
+  - assumes_unit_modulus_pilots
+  - zero_extended_padded_frequency_boundary
+  - no_smoothing_dft_or_lmmse
+  - err_var_is_not_computed_by_kernel
+  - correctness_artifacts_not_bound_to_git_commit_or_exact_cann_version
+  - final_event_optimized_source_has_no_archived_benchmark
+  - stale_unused_channel_est_ls_header
+
+next_tasks:
+  - rerun_clean_correctness_and_archive_environment_and_checksums
+  - benchmark_final_event_optimized_source_with_acl_events_and_msprof
+  - remove_or_update_stale_header_and_version_comments
+  - add_independent_sionna_differential_validation
+  - add_tail_halo_random_and_boundary_cases
+  - implement_or_remove_err_var_output
+  - parameterize_dmrs_bandwidth_slot_and_batch
+  - extend_to_multiport_mimo_when_chain_contract_is_ready

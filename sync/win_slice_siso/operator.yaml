@@ -1,0 +1,190 @@
+schema_version: 1
+
+id: null
+id_status: unassigned_verified_no_catalog_entry
+name: win_slice_siso
+aliases: [win_slice]
+category: sync
+category_status: verified_from_current_function_and_clean_taxonomy
+domain: sync
+chain: rx
+role: siso_rx_frontend_slot_slice_and_timing_feedback
+status: migrated_static_verified_needs_reference_update_and_npu_revalidation
+knowledge_status: current_source_reconciled_with_two_historical_conversations
+
+runtime_identity:
+  enum: OP_win_slice
+  enum_value: 19
+  enum_value_basis: zero_based_rx_chain_host_runtime_index
+  catalog_id_equivalent: false
+
+paths:
+  source: kernels/sync/win_slice_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/win_slice
+  knowledge: kernels/sync/win_slice_siso/KNOWLEDGE.md
+  conversations:
+    - conversations/RX_CHAIN_rx_chain_v2.md
+    - conversations/T07_scramble_v2.md
+  standalone_conversation: null
+  standalone_conversation_status: not_found_win_slice_is_embedded_in_rx_chain_histories
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  clean_runtime_verified: false
+
+interface:
+  mode: siso
+  inputs:
+    - name: capture
+      dtype: int16
+      logical_dtype: complex_iq
+      shape: [1228800, 2]
+      layout: interleaved_iq
+      residency: device_capture_once
+    - name: delta_T
+      dtype: float32
+      allocated_shape: [8]
+      valid_elements: 1
+      unit: complex_samples_at_61440000_hz
+      producer: previous_slot_timing_tracker
+    - name: rd_ptr
+      dtype: int32
+      allocated_shape: [8]
+      direction: inout
+      fields:
+        - {index: 0, name: integer_complex_sample_index}
+        - {index: 1, name: fractional_sample_q16, scale: 65536}
+  outputs:
+    - name: slot_iq
+      dtype: int16
+      logical_dtype: complex_iq
+      shape: [30720, 2]
+      layout: interleaved_iq_with_cp
+    - name: rd_ptr
+      dtype: int32
+      allocated_shape: [8]
+      valid_elements: 2
+      direction: inout
+  abi_tail:
+    workspace: unused_placeholder
+    tiling: unused_placeholder
+
+algorithm:
+  family: device_side_fractional_delay_slot_slicing
+  samples_per_slot: 30720
+  sample_rate_hz: 61440000
+  slot_duration_us: 500
+  state_update: rd_f_equals_rd_integer_plus_q16_fraction_plus_30720_plus_previous_delta_T
+  integer_position: floor
+  interpolation: first_order_linear_between_adjacent_complex_samples
+  interpolation_compute_dtype: float16
+  output_rounding: CAST_RINT_to_int16
+  iq_interpolation: independent_I_and_Q_using_source_offset_two_int16
+  capture_model: linear_resident_buffer_not_ring_aware
+  wraparound: unsupported
+  bounds_check: absent
+  safe_window_condition: 0_le_rd_int_and_rd_int_plus_30720_lt_capture_complex_samples
+
+integration:
+  upstream_state:
+    - rx_acquire_initializes_rd_ptr_to_pusch_start_minus_30720_and_fraction_zero
+    - timing_tracker_writes_delta_T_after_each_slot
+  direct_consumers:
+    - cfo_estimate
+    - cfo_compensate
+  downstream:
+    - ofdm_demod
+  launch_order:
+    - win_slice
+    - cfo_estimate
+    - cfo_compensate
+    - ofdm_demod
+  stream_semantics: previous_slot_delta_T_is_visible_to_next_slot_without_host_readback
+
+execution:
+  active_blocks: 1
+  required_active_block_index: 0
+  historical_launch_block_dim: 4
+  tile_int16_elements: 7680
+  tile_count: 8
+  workspace_used: false
+  tiling_used: false
+  commands:
+    standalone_script: bash run.sh
+    current_command_status: stale_reference_contract
+
+source_relation:
+  migrated_files: 9
+  current_kernel_sha256: 959b16a37075dc1a572eba1a663f56315bfd706d9d08b0b26eb757e215b1c37e
+  downloaded_old_kernel_sha256: 34ac41d168219132bc8136697146d65a410c7966a9ac22b88c43d082289bfe0e
+  reference_sha256: b4711547b294df5610abe238676f5b095399427cdf037e596c1cd14112bd8aa3
+  verifier_sha256: 2ea07ed419411e718fc1499797896e12feb8a56c665d8bb5b84eae66d5f1bbdc
+  downloaded_reference_identical_to_source: true
+  downloaded_verifier_identical_to_source: true
+  downloaded_kernel_duplicates_identical_to_each_other: true
+  downloaded_kernels_match_current_source: false
+
+correctness:
+  current_source_reference_status: missing
+  migrated_validation: static_and_lightweight_cpu_model_only
+  stale_standalone_reference:
+    behavior: integer_round_delta_T_then_bit_exact_copy
+    source_data_result: 5_of_5_pass
+    status: STALE_NOT_CURRENT_KERNEL_EVIDENCE
+  historical_fractional_delay_chain_results:
+    - {case: no_sfo, ber: 0.0, status: HISTORICAL}
+    - {case: sfo_5ppm, ber: 0.0, status: HISTORICAL}
+    - {case: sfo_20ppm, ber: 0.0, status: HISTORICAL}
+    - {case: sfo_50ppm, bit_errors: 3663, compared_bits: 1208064, ber: 0.003032, status: HISTORICAL}
+  static_validation:
+    source_cmp: verified
+    conversation_cmp_and_sha256: verified
+    shell_syntax: verified
+    python_ast: verified
+    yaml_parse: verified
+    forbidden_artifacts_absent: verified
+    lightweight_current_cpu_model: verified
+    npu_build_or_run: not_run_by_request
+
+performance:
+  status: historical_chain_only_needs_clean_rebenchmark
+  standalone_current_kernel_latency_us: null
+  msprof_status: no_raw_report_preserved
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/**
+  - prof/**
+  - profiling/**
+  - '**/__pycache__/**'
+  - '*.bin'
+  - '*.zip'
+  - '*.o'
+  - '*.so'
+  - '*.a'
+
+known_limitations:
+  - no_formal_catalog_op_id
+  - fixed_siso_single_capture_stream
+  - fixed_30720_complex_samples_per_slot
+  - fixed_int16_interleaved_iq_layout
+  - linear_capture_only_no_ring_wraparound
+  - no_kernel_bounds_check
+  - requires_one_extra_complex_sample_for_interpolation
+  - standalone_reference_main_and_verifier_are_stale_for_fractional_delay_kernel
+  - float16_linear_interpolation_can_distort_high_fractional_delay_cases
+  - current_clean_npu_correctness_and_performance_not_revalidated
+
+next_tasks:
+  - obtain_formal_operator_id_from_project_registry
+  - update_reference_main_and_verifier_for_q16_fractional_state
+  - add_negative_positive_fractional_and_multislot_cases
+  - define_and_implement_explicit_boundary_or_ring_wrap_policy
+  - revalidate_win_slice_to_cfo_compensate_to_ofdm_demod_on_Ascend310P3
+  - reproduce_positive_and_negative_sfo_sweeps_with_saved_vectors_and_manifest

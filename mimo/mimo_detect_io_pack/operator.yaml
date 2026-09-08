@@ -1,0 +1,101 @@
+schema_version: 1
+
+id: mimo_detect_io_pack
+name: mimo_detect_io_pack
+category: mimo
+domain: rx
+chain: rx
+status: implemented_host_and_npu_verified
+
+paths:
+  source: kernels/mimo/mimo_detect_io_pack
+  knowledge: kernels/mimo/mimo_detect_io_pack/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P1
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+interface:
+  public_args: MimoDetectIoPackOpArgsV1
+  runtime_entry: Enqueue
+  shared_types: kernels/common/pusch_mimo_types.h
+  inputs:
+    - {name: rx_grid_re, dtype: float16, shape: [NR, 14, 1664], layout: rx_symbol_subcarrier}
+    - {name: rx_grid_im, dtype: float16, shape: [NR, 14, 1664], layout: rx_symbol_subcarrier}
+    - {name: h_grid_re, dtype: float16, shape: [NR, 16, 14, 1664], layout: rx_layer_symbol_subcarrier}
+    - {name: h_grid_im, dtype: float16, shape: [NR, 16, 14, 1664], layout: rx_layer_symbol_subcarrier}
+    - {name: noise_var_rx, dtype: float16, shape: [NR], layout: rx}
+  outputs:
+    - {name: hrm_re, dtype: float16, shape: [23296, NR, 16], layout: re_rx_layer}
+    - {name: hrm_im, dtype: float16, shape: [23296, NR, 16], layout: re_rx_layer}
+    - {name: yvpad_re, dtype: float16, shape: [23296, NR, 16], layout: re_rx_layer_repeated_y}
+    - {name: yvpad_im, dtype: float16, shape: [23296, NR, 16], layout: re_rx_layer_repeated_y}
+    - {name: no, dtype: float16, shape: [23296], layout: re}
+  runtime_control:
+    configs: PuschMimoConfig[]
+    layer_plan: MimoDetectLayerPlan
+    active_layers: "sum(config.num_layers), range [1,16]"
+
+chain_contract:
+  producer: channel_est_lmmse_mimo
+  producer_h_shape: [NR, 16, 14, 1664]
+  consumer: mimo_detect_bri_batch
+  consumer_pack_mode: 0
+  consumer_physical_inputs:
+    hrm: [23296, NR, 16]
+    yvpad: [23296, NR, 16]
+    no: [23296]
+  rejected_stale_layout: y_group
+
+algorithm:
+  h_mapping: "hrm[re,rx,layer] = H[rx,layer,re] for layer < active_layers"
+  inactive_h: "explicit positive zero for [active_layers,16)"
+  y_mapping: "yvpad[re,rx,0:16] repeats rx_grid[rx,re]"
+  noise_mapping: "fp16(sum_fp32(noise_var_rx in rx order) / NR) repeated over RE"
+
+execution:
+  block_dim: 4
+  re_per_core: 5824
+  re_tile: 16
+  rx_tile_h: {NR16: 16, NR32_64: 32}
+  rx_group_y: 16
+  inter_core_sync: none
+  kernel_launches_per_slot: 1
+
+commands:
+  build: "cmake -S . -B build -DRUN_MODE=npu -DSOC_VERSION=Ascend310P1 -DIO_PACK_RX_CAPACITY=16|32|64 && cmake --build build -j"
+  host_contract: "ctest --test-dir build --output-on-failure"
+  run_nr16: "IO_PACK_RX_CAPACITY=16 WARMUP=0 TIMED=1 ./run.sh"
+  run_nr64: "IO_PACK_RX_CAPACITY=64 WARMUP=0 TIMED=1 ./run.sh"
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  comparison: fp16_storage_bit_exact
+  test_plan:
+    allocation_layers: [4, 3, 2]
+    allocation_offsets: [0, 4, 7]
+    active_layers: 9
+  checks:
+    - re_and_four_core_boundaries
+    - rx_boundaries
+    - active_layer_axis
+    - inactive_input_poison_and_positive_zero_output
+    - full_16_column_yvpad_replication
+    - fp32_noise_mean
+    - malformed_layer_plan_rejection
+
+verification:
+  ascendc_build_ascend310p1: pass
+  host_contract_ctest: pass
+  upstream_active_h_golden_contract: pass
+  npu_active_layer_case: pass_active_layers_9_all_five_outputs_exact
+  npu_p50_us: 14170.6
+  loopback_rank4_nr16: actual_npu_pass_all_five_outputs
+
+known_limitations:
+  - rx_capacity_build_time_16_32_64_only
+  - fixed_16physical_layer_14x1664_profile
+  - white_noise_scalar_mean_only
+  - physical_output_bytes_scale_linearly_with_nr
+  - layout_adapter_does_not_validate_channel_estimation_values

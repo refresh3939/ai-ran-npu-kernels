@@ -1,0 +1,104 @@
+schema_version: 1
+
+id: R10_mimo
+name: layer_demap_mimo
+aliases: [layer_demap]
+category: mapping
+domain: mapping
+chain: rx
+spatial_mode: runtime_layer_batch
+status: implemented_host_and_npu_verified
+
+paths:
+  source: kernels/mapping/layer_demap_mimo
+  derived_from: kernels/rx/layer_demap
+  implementation: kernels/mapping/layer_demap_mimo/layer_demap_kernel.cpp
+  knowledge: kernels/mapping/layer_demap_mimo/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P1
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+
+chain_contract:
+  upstream: qam_demod_256_mimo_batch
+  downstream: descramble_mimo
+  canonical_rx_path:
+    - qam_demod_256_mimo_batch
+    - layer_demap_mimo
+    - descramble_mimo
+
+interface:
+  public_args: LayerDemapOpArgsV1
+  shared_types: common/pusch_mimo_types.h
+  supported_layers: [1, 2, 3, 4]
+  inputs:
+    - name: layer_llr
+      dtype: int16
+      fixed_point: Q11.5
+      shape: [L, 8, 12, 1600]
+      layout: layer_qam_stream_data_symbol_physical_subcarrier
+      valid_subcarriers_per_symbol: 1596
+      padding_per_symbol: 4
+      padding_policy: ignored
+  outputs:
+    - name: cw_llr
+      dtype: int16
+      fixed_point: Q11.5
+      shape: [8, "L*19200"]
+      layout: qam_stream_compact_re_layer
+      valid_elements_per_stream: "L*19152"
+      tail_elements_per_stream: "L*48"
+      tail_policy: explicit_zero
+  qam_stream_order: [I_c0, I_c1, I_c2, I_c3, Q_c0, Q_c1, Q_c2, Q_c3]
+  qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+  polarity: positive_means_bit_0
+  adapter_owned_resources: [tiling, gather_index]
+
+algorithm:
+  family: layer_demapping
+  implementation: fused_symbol_padding_compaction_and_layer_interleave
+  input_index: "(((l*8+q)*12+ds)*1600+sc)"
+  output_index: "q*(L*19200)+(ds*1596+sc)*L+l"
+  intermediate_gm_materialization: false
+
+execution:
+  block_dim: 4
+  active_cores: 4
+  scheduling: "core c owns q=c and q=c+4"
+  symbols_per_group: 4
+  groups_per_q_stream: 3
+  gather_re_chunk: 128
+  cross_core_sync: false
+  kernel_launches_per_slot: 1
+
+commands:
+  generate: python3 scripts/gen_data.py
+  host_contract: out/bin/layer_demap_contract_test
+  run: bash run.sh
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  comparison: int16_bit_exact
+  tested_layers: [1, 2, 3, 4]
+  input_symbol_padding_poisoned: true
+  output_tail_zero_required: true
+  rank5_rejected: true
+  current_source_validation:
+    date: 2026-09-08
+    soc: Ascend310P1
+    ascendc_build: pass
+    host_contract_rank1_through_rank4: pass
+    layer_map_inverse_rank1_through_rank4: pass
+    npu_result: pass_in_rank4_nr16_and_rank3_nr64_rx_chain
+  required_clean_validation:
+    - host_contract_rank1_through_rank4_pass
+    - npu_rank1_through_rank4_pass
+    - qam_output_to_descramble_input_contract_pass
+    - clean_tree_check_pass
+
+known_limitations:
+  - fixed_14_symbol_133rb_geometry
+  - fixed_dmrs_symbols_2_and_11
+  - fixed_256qam
+  - maximum_four_logical_layers

@@ -1,0 +1,197 @@
+schema_version: 1
+
+id: T05
+name: rate_match_siso
+aliases: [rate_match]
+category: fec
+domain: fec
+chain: tx
+spatial_mode: siso
+status: implemented_verified_optimized
+knowledge_status: current_source_checked_npu_verified
+
+paths:
+  source: kernels/fec/rate_match_siso
+  migration_origin: /home/refresh/AI-RAN-NPU/kernels/tx/rate_match
+  knowledge: kernels/fec/rate_match_siso/KNOWLEDGE.md
+  conversation: conversations/T05_rate_match.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+  installed_cann_version_at_migration: 8.0.0
+  installed_compiler_version_at_migration: 7.6.0.1.220
+
+interfaces:
+  inputs:
+    - name: codeword_gm
+      dtype: int8
+      shape: [143, 25344]
+      layout: code_block_punctured_bit
+      value_domain: [0, 1]
+      punctured_prefix_present: false
+    - name: unused1_gm
+      dtype: opaque_alias
+      shape: []
+      used: false
+      purpose: launch_abi_placeholder
+    - name: unused2_gm
+      dtype: opaque_alias
+      shape: []
+      used: false
+      purpose: launch_abi_placeholder
+  outputs:
+    - name: layout_gm
+      dtype: int16
+      shape: [23, 8, 19200]
+      layout: slot_bit_stream_re
+      valid_re_per_stream_per_slot: 19152
+      padding_value: 0
+
+algorithm:
+  standard: 3gpp_ts_38_212_section_5_4_2
+  family: 5g_nr_ldpc_rate_matching
+  base_graph: BG1
+  lifting_size: 384
+  modulation_order_qm: 8
+  layers: 1
+  redundancy_version: 0
+  k0: 0
+  code_blocks: 143
+  ldpc_mother_code_length: 26112
+  punctured_prefix_2z: 768
+  circular_buffer_ncb: 25344
+  filler_supported: false
+  repetition_active: false
+  lbrm_supported: false
+  n_slot: 23
+  valid_re_per_slot: 19152
+  padded_re_per_stream: 19200
+  total_coded_bits_g: 3523968
+  e_distribution:
+    - code_blocks: 87
+      e: 24640
+      eq: 3080
+    - code_blocks: 56
+      e: 24648
+      eq: 3081
+
+execution:
+  batch_scope: one_transport_block
+  batch_parameter: compile_time
+  code_blocks_per_batch: 143
+  block_dim: 4
+  partition_axis: output_stream
+  logical_aiv_mapping: get_block_idx_xor_2
+  streams_per_aiv: 2
+  stream_ownership:
+    - aiv: 0
+      streams: [0, 1]
+    - aiv: 1
+      streams: [2, 3]
+    - aiv: 2
+      streams: [4, 5]
+    - aiv: 3
+      streams: [6, 7]
+  slot_ring_depth: 1
+  input_cast_ring_depth_code_blocks: 4
+  copy_strategy: stream_owned_full_slot_two_block_datacopy
+  output_read_modify_write: false
+  pipeline_drain: pipe_all_once_per_four_code_blocks_and_at_end
+  runtime_tiling_used: false
+  host_zero_initialization_required: true
+
+commands:
+  working_directory: kernels/fec/rate_match_siso
+  reference_check: PYTHONDONTWRITEBYTECODE=1 python3 scripts/rate_match_ref.py
+  kernel_simulation: PYTHONDONTWRITEBYTECODE=1 python3 -c "import sys; sys.path.insert(0, 'scripts'); from build_kernel_artifacts import simulate_and_verify; raise SystemExit(0 if simulate_and_verify() else 1)"
+  generate: PYTHONDONTWRITEBYTECODE=1 python3 scripts/build_kernel_artifacts.py
+  run_npu_310p1: bash run.sh -r npu -v Ascend310P1
+  run_npu_310p3: bash run.sh -r npu -v Ascend310P3
+  verification_note: generator_and_run_script_assert_current_dtype_shape_and_exact_file_sizes
+
+correctness:
+  reference: numpy_explicit_interleave_and_rate_dematch_roundtrip
+  kernel_reference: scripts/build_kernel_artifacts.py
+  npu_comparison: elementwise_bit_exact
+  tolerance: 0
+  compared_elements_current: 3532800
+  current_reference_status: verified_2026_09_06
+  current_kernel_simulation_status: verified_2026_09_06
+  current_golden_file_status: verified_int8_input_int16_output_exact_sizes
+  current_npu_status: ascend310p1_zero_mismatches_2026_09_06
+  current_npu_runs_checked: 5
+  current_npu_mismatches_each_run: 0
+  current_soc: Ascend310P1
+  historical_npu_status: old_geometry_zero_mismatches
+  historical_compared_elements: 3694592
+
+performance:
+  status: verified_current_ascend310p1
+  metric_scope: kernel_launch_for_one_transport_block
+  measurement_method: 5_warmups_then_50_rounds_of_10_launches_and_one_sync
+  current_measurement:
+    soc: Ascend310P1
+    date: 2026-09-06
+    version: v5c_stream_owned_slot_batch_four_cb_input_ring
+    p50_us_per_tb_samples: [116.3, 107.4, 129.5, 109.0, 107.5]
+    representative_p50_us_per_tb: 109.0
+    representative_p50_us_per_slot: 4.74
+    baseline_v4_p50_us_per_tb: 161.8
+    improvement_percent: 32.6
+    speedup: 1.48
+    note: representative_value_is_median_of_five_independent_p50_results
+  historical_geometry:
+    n_slot: 41
+    valid_re_per_slot: 10960
+    padded_re_per_stream: 11264
+  historical_results:
+    - version: single_core_scatter_labeled
+      block_dim: 1
+      p50_us_per_tb: 12836.5
+      min_us_per_tb: 12827.3
+      p90_us_per_tb: 12842.2
+    - version: four_core_adds_copy_reported
+      block_dim: 4
+      p50_us_per_tb: 142.5
+      min_us_per_tb: 141.0
+      p90_us_per_tb: 148.8
+  profiler_status: no_msprof_data_in_conversation
+  stale_metric: historical_p50_divided_by_41_equals_3_48_us_per_slot
+
+generated_artifacts:
+  - data/golden/tx/rate_match/codeword_in.bin
+  - data/golden/tx/rate_match/layout_ref.bin
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - __pycache__/**
+  - scripts/__pycache__/**
+
+known_limitations:
+  - fixed_compile_time_geometry
+  - only_bg1_z384_qm8_single_layer_143_code_blocks
+  - only_rv0_k0_zero_without_filler_lbrm_or_repetition
+  - host_must_zero_full_output_before_launch
+  - pipe_all_drain_once_per_four_code_blocks_may_limit_pipeline_overlap
+  - one_fixed_random_seed_used_for_current_npu_correctness
+  - current_npu_measurement_only_on_ascend310p1
+  - no_current_msprof_capture
+  - two_unused_launch_abi_arguments
+  - runtime_tiling_and_workspace_are_stubs
+  - scatter_fault_root_cause_claim_is_rejected_by_later_success_log
+
+next_tasks:
+  - capture_msprof_for_v5c_and_quantify_pipe_all_cost
+  - validate_targeted_event_chain_with_a_minimal_probe_before_reducing_drains
+  - retry_two_slot_output_ring_only_with_proven_mte3_to_vector_lifetime_sync
+  - run_bit_exact_and_performance_validation_on_ascend310p3
+  - add_all_zero_all_one_multi_seed_boundary_and_end_to_end_chain_tests
+  - record_source_hashes_raw_logs_and_a_performance_regression_threshold
+  - add_runtime_geometry_nonzero_rv_filler_and_repetition

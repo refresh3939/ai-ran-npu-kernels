@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://airan.local/schemas/mimo-operator-capabilities-v1.json",
+  "title": "AI-RAN MIMO operator capability registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "registry_name", "target", "variants", "operators"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "registry_name": {"type": "string", "minLength": 1},
+    "target": {"type": "string", "minLength": 1},
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "constraints", "runtime", "build"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "constraints": {"$ref": "#/$defs/constraints"},
+          "runtime": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rx_bucket", "layer_bucket"],
+            "properties": {
+              "rx_bucket": {"type": "integer", "minimum": 1, "maximum": 64},
+              "layer_bucket": {"type": "integer", "minimum": 1, "maximum": 16}
+            }
+          },
+          "build": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ce_nr", "ce_nl_source", "ce_retained_rank", "ce_block_dim", "ce_cube_time_fused", "detector_rx_capacity", "detector_layer_capacity", "detector_bri_block"],
+            "properties": {
+              "ce_nr": {"type": "integer", "minimum": 1, "maximum": 64},
+              "ce_nl_source": {"const": "active.rank"},
+              "ce_retained_rank": {"type": "integer", "minimum": 16, "maximum": 128, "multipleOf": 16},
+              "ce_block_dim": {"enum": [1, 2, 4]},
+              "ce_cube_time_fused": {"type": "boolean"},
+              "detector_rx_capacity": {"type": "integer", "minimum": 1, "maximum": 64},
+              "detector_layer_capacity": {"type": "integer", "minimum": 1, "maximum": 16},
+              "detector_bri_block": {"type": "integer", "minimum": 1, "maximum": 16}
+            }
+          }
+        }
+      }
+    },
+    "operators": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "scope", "implementation", "required", "constraints"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "scope": {"enum": ["tx", "rx", "host_boundary"]},
+          "implementation": {"type": "string", "minLength": 1},
+          "required": {"type": "boolean"},
+          "constraints": {"$ref": "#/$defs/constraints"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "allowed": {"type": "array", "minItems": 1},
+          "equals": {},
+          "minimum": {"type": "number"},
+          "maximum": {"type": "number"}
+        },
+        "oneOf": [
+          {"required": ["allowed"]},
+          {"required": ["equals"]},
+          {"required": ["minimum"]},
+          {"required": ["maximum"]}
+        ]
+      }
+    }
+  }
+}

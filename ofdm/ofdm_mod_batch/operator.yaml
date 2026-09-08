@@ -1,0 +1,75 @@
+schema_version: 1
+
+id: T14B
+name: ofdm_mod_batch
+aliases: [ofdm_mod_batch]
+category: ofdm
+domain: ofdm
+chain: tx
+spatial_mode: batched
+status: implemented_optimized_npu_verified
+knowledge_status: current_source_audited_and_profiled
+
+paths:
+  source: kernels/ofdm/ofdm_mod_batch
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/ofdm_mod_batch
+  knowledge: kernels/ofdm/ofdm_mod_batch/KNOWLEDGE.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  verified_soc_version: Ascend310P1
+  cann_version: 8.0.0
+
+interface:
+  batch_size: runtime_positive_integer
+  inputs:
+    - {name: input_re, dtype: float16, shape: [B, 14, 32, 64], layout: s4_mixed_radix}
+    - {name: input_im, dtype: float16, shape: [B, 14, 32, 64], layout: s4_mixed_radix}
+  outputs:
+    - {name: output_re, dtype: int16, shape: [B, 30720], layout: natural_time_with_cp}
+    - {name: output_im, dtype: int16, shape: [B, 30720], layout: natural_time_with_cp}
+    - {name: output_iq, dtype: int16, shape: [B, 30720, 2], layout: interleaved_iq}
+  output_scale: 1600.0
+
+algorithm:
+  family: 5g_nr_cp_ofdm_modulation
+  implementation: reverse_mixed_radix_32x64_low_level_mmad
+  fft_size: 2048
+  symbols_per_slot: 14
+  samples_per_slot: 30720
+  cyclic_prefix_lengths: {first: 176, other: 144}
+  stages: [idft64_unitary, inverse_twiddle, idft32_unitary, quantize_int16, cyclic_prefix_insert, iq_interleave]
+
+execution:
+  launch_model: one_persistent_device_kernel
+  block_dim: 4
+  symbol_tiles_per_batch: 4
+  symbols_per_tile: 4
+  tile_schedule: grid_stride_over_batch_times_four_tiles
+  phase_a_symbol_fusion: four_symbols_in_m_dimension
+  phase_b_twiddle_storage: four_32_by_16_panels_resident_in_l1
+  phase_c_co1_queue_depth: 4
+  weights: w32_l0a_and_w64_l0b_loaded_only_for_first_batch_item
+  gm_scratch: false
+  input_d2d_staging: false
+
+commands:
+  run_ascend310p1_b8: bash run.sh -r npu -v Ascend310P1 -b 8
+  verify: python3 scripts/verify_result.py --batch-size 8
+
+correctness:
+  verified_batch_size: 8
+  symbols_passed: 112
+  symbols_required: 112
+  cyclic_prefix: pass
+  iq_interleave: pass
+  max_dequantized_abs_error: 0.0025
+  repeated_independent_process_runs: 10
+
+performance:
+  platform: Ascend310P1
+  metric: one_launch_plus_stream_synchronize_host_wall_clock
+  sample_policy: 10_warmup_then_median_50_timed_launches
+  batch_size_8_p50_us: 257.4
+  batch_size_8_amortized_p50_us_per_slot: 32.2

@@ -1,0 +1,208 @@
+schema_version: 1
+
+id: T11
+id_provenance: inferred_from_tx_15_operator_order_dmrs_gen_is_11th
+name: dmrs_gen_siso
+aliases: [dmrs_gen]
+category: sync
+domain: sync
+chain: tx
+spatial_mode: siso
+stage: pusch_dmrs_generation_before_resource_element_mapping
+status: implemented_standalone_and_chain_source_adapted_needs_clean_revalidation
+knowledge_status: extracted_source_checked_and_offline_outputs_verified
+
+paths:
+  source: kernels/sync/dmrs_gen_siso
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/dmrs_gen
+  knowledge: kernels/sync/dmrs_gen_siso/KNOWLEDGE.md
+  conversation: conversations/T11_dmrs_gen.md
+  original_conversation: /home/refresh/下载/Dreams generation.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_cann_version: 8.0.0
+  locally_detected_cann_version: 8.0.0
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  kernel_signature:
+    - cinit_gm
+    - gmat_gm
+    - g1_gm
+    - scratch_gm
+    - out_re_gm
+    - out_im_gm
+    - dbg_gm
+    - ws_gm
+    - tiling_gm
+  inputs:
+    - name: cinit
+      dtype: int32
+      shape: [2]
+      physical_shape: [16]
+      layout: one_c_init_per_dmrs_symbol
+      bytes: 64
+    - name: gmat
+      dtype: float16
+      shape: [31, 1792]
+      layout: x2_unit_response_rows_with_real_imag_planes_and_padding
+      bytes: 111104
+    - name: g1
+      dtype: float16
+      shape: [1792]
+      layout: x1_response_with_real_imag_planes_and_padding
+      bytes: 3584
+    - name: scratch
+      dtype: uint8
+      shape: [128]
+      current_kernel_usage: unused_parameter
+    - name: workspace
+      dtype: uint8
+      shape: platform_lib_api_workspace
+      current_kernel_usage: unused_parameter
+    - name: tiling
+      dtype: uint8
+      shape: [128]
+      current_kernel_usage: unused_zero_placeholder
+  outputs:
+    - name: x_re
+      dtype: float16
+      shape: [2, 896]
+      logical_valid_shape: [2, 798]
+      layout: dmrs_symbol_major_real_plane_zero_padded
+      bytes: 3584
+    - name: x_im
+      dtype: float16
+      shape: [2, 896]
+      logical_valid_shape: [2, 798]
+      layout: dmrs_symbol_major_imag_plane_zero_padded
+      bytes: 3584
+    - name: dbg
+      dtype: float32
+      shape: [8]
+      bytes: 32
+      fields:
+        - {index: 0, name: c_init_symbol_2}
+        - {index: 1, name: c_init_symbol_11}
+        - {range: "2:6", name: zero_reserved}
+        - {index: 7, name: kernel_ran_sentinel, expected: 7.0}
+
+algorithm:
+  family: 5g_nr_pusch_dmrs_gold_qpsk
+  implementation: host_precomputed_gf2_unit_response_matrix_vector_mod2
+  standard_reference: 3gpp_ts_38_211_sections_5_2_1_and_6_4_1_1
+  gold_register_length: 31
+  gold_nc: 1600
+  symbols_per_slot: 14
+  dmrs_symbols: [2, 11]
+  dmrs_type: 1
+  dmrs_comb: 2
+  active_subcarriers: 1596
+  dmrs_re_per_symbol: 798
+  padded_dmrs_re: 896
+  gold_bits_per_symbol: 1596
+  qpsk_scale_float16: 0.70703125
+  c_init_formula: "(2^17*(14*slot+l+1)*(2*N_ID+1)+2*N_ID+n_SCID) mod 2^31"
+  matrix_rows: 31
+  matrix_row_elements: 1792
+  parity_formula: "count-2*RINT(count*0.5-0.25)"
+
+execution:
+  batch:
+    unit: slot
+    size: 1
+    runtime_parameterized: false
+  block_dim: 1
+  engine: AIV_vector
+  aiv_mapping_xor_2: false
+  selected_aiv_id: 0
+  approximate_ub_bytes: 125536
+  warmup_runs: 10
+  timed_runs: 50
+  tiling: zero_placeholder_128_bytes
+
+commands:
+  generate: python3 scripts/dmrs_gen_ref.py
+  reference_selftest: python3 scripts/dmrs_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  status: source_adjacent_outputs_observed_clean_unverified
+  reference: numpy_gold_array_and_rolling_lfsr_plus_matricized_crosscheck
+  sionna_crosscheck: hook_only_not_implemented
+  comparison: separate_plane_absolute_error
+  error_threshold: 0.001
+  expected_stronger_result: float16_bit_exact
+  success_pattern: "Total: 5 / 5 PASS"
+  cases:
+    - {name: baseline, slot: 0, n_id: 1, n_scid: 0}
+    - {name: nid0, slot: 0, n_id: 0, n_scid: 0}
+    - {name: slot7, slot: 7, n_id: 1, n_scid: 0}
+    - {name: nscid1, slot: 0, n_id: 1, n_scid: 1}
+    - {name: nid_large, slot: 0, n_id: 300, n_scid: 0}
+  source_adjacent_output_observation:
+    output_timestamp: 2026-06-11T21:29:09+08:00
+    migration_offline_verify_passed: 5
+    total: 5
+    max_re_error: 0.0
+    max_im_error: 0.0
+    npu_rerun_performed_during_migration: false
+
+performance:
+  status: historical_needs_clean_revalidation_and_msprof
+  measurement_scope: host_wall_clock_kernel_launch_plus_stream_sync
+  msprof_available: false
+  historical_final_production:
+    soc: Ascend310P3
+    cann: 8.0.0
+    warmup_runs: 10
+    timed_runs: 50
+    min_us: 25.5
+    average_us: 27.3
+    p50_us: 26.0
+    p99_us: 36.3
+    max_us: 36.3
+  bottleneck_hypothesis: repeated_gmat_g1_gm_to_ub_load
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**/*.bin
+  - data/golden/**/meta.txt
+  - data/ascend_output/**/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "*.zip"
+
+known_limitations:
+  - standalone_signature_adds_gmat_and_g1_beyond_original_cinit_only_abi
+  - historical_tx_chain_old_signature_compile_failure_was_later_fixed_in_current_source
+  - current_tx_chain_duplicates_build_dmrs_matrix_instead_of_sharing_one_implementation
+  - current_tx_chain_source_adaptation_not_built_or_run_during_migration
+  - fixed_two_dmrs_symbols_type1_comb2_single_slot_single_antenna_layout
+  - n_id_n_scid_and_slot_must_match_gnb_and_rx_reference
+  - sionna_hook_does_not_perform_crosscheck
+  - gmat_and_g1_are_loaded_from_gm_to_ub_on_every_launch
+  - no_clean_npu_build_run_or_benchmark_during_migration
+  - no_msprof_data
+  - no_device_output_to_rx_operator_end_to_end_test
+  - dav_m200_in_place_tensor_scalar_muls_tail_failure_observed_without_minimal_probe
+
+next_tasks:
+  - migrate_or_audit_current_tx_chain_gmat_g1_source_adaptation_in_clean_tree
+  - clean_build_tx_chain_and_verify_both_dmrs_gen_launch_sites
+  - consolidate_duplicate_build_dmrs_matrix_implementations
+  - run_clean_five_case_npu_regression_and_archive_environment_and_log
+  - implement_real_sionna_pusch_dmrs_crosscheck
+  - run_dmrs_gen_device_output_to_channel_est_and_cfo_dmrs_end_to_end_test
+  - profile_current_kernel_with_msprof
+  - evaluate_int8_matrix_or_selected_row_transfer_if_profiling_confirms_load_bottleneck
+  - add_multi_slot_boundary_cinit_and_configuration_coverage

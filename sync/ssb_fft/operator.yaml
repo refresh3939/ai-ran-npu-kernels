@@ -1,0 +1,207 @@
+schema_version: 1
+
+id: R3.25
+id_provenance: inferred_during_clean_migration_between_R3_sss_and_R3_5_pbch_dmrs
+name: ssb_fft
+category: sync
+domain: sync
+chain: rx
+status: implemented_historical_pass_needs_clean_npu_revalidation
+knowledge_status: extracted_current_source_audited_conversation_reconciled
+
+paths:
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/ssb_fft
+  source: kernels/sync/ssb_fft
+  knowledge: kernels/sync/ssb_fft/KNOWLEDGE.md
+  conversation: conversations/R3.25_ssb_fft.md
+
+target:
+  architecture: dav_m200
+  default_soc: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  cann:
+    configured_path: /usr/local/Ascend/ascend-toolkit/latest
+    migration_host_version: 8.0.0
+    migration_host_build: 7.6.0.1.220
+    historical_benchmark_version: not_fully_recorded
+
+io:
+  inputs:
+    - name: input_iq
+      dtype: int16
+      logical_dtype: complex_q8_8
+      shape: [3, 292, 2]
+      allocated_shape: [1760]
+      logical_elements_int16: 1752
+      layout: symbol_sample_interleaved_iq_with_tail_padding
+      contains_cyclic_prefix: true
+    - name: w16_re
+      dtype: fp16
+      shape: [16, 16]
+      layout: row_major
+    - name: w16_im
+      dtype: fp16
+      shape: [16, 16]
+      layout: row_major
+    - name: twiddle_re
+      dtype: fp16
+      shape: [16, 16]
+      layout: k1_n2_row_major
+    - name: twiddle_im
+      dtype: fp16
+      shape: [16, 16]
+      layout: k1_n2_row_major
+    - name: gather_idx
+      dtype: int32
+      shape: [144]
+      layout: x2_internal_flat_indices_with_transpose_folded
+      variants: [nu0, nu1, nu2, nu3]
+    - name: derot_re
+      dtype: fp16
+      shape: [144]
+    - name: derot_im
+      dtype: fp16
+      shape: [144]
+    - name: scratch
+      dtype: fp16
+      shape: [4, 3, 16, 16]
+      planes: [x_re, x_im, tw_re, tw_im]
+  outputs:
+    - name: output_re
+      dtype: fp16
+      shape: [144]
+      consumer: pbch_dmrs_correlator
+    - name: output_im
+      dtype: fp16
+      shape: [144]
+      consumer: pbch_dmrs_correlator
+
+algorithm:
+  family: 5g_nr_ssb_pbch_fft_and_dmrs_extract
+  implementation: mixed_radix_16x16_four_real_mmad
+  fft_size: 256
+  fft_normalization: unitary
+  normalization_factor: 0.0625
+  normalization_placement: each_w16_stage
+  radix_p: 16
+  radix_q: 16
+  symbols:
+    ssb_indices: [1, 2, 3]
+    count: 3
+    cyclic_prefix_samples: 36
+    symbol_stride_samples: 292
+    sample_rate_hz: 7680000
+  input_scale: 0.00390625
+  n_dmrs_re: 144
+  dmrs_re_per_symbol: [60, 24, 60]
+  n_ssb_subcarriers: 240
+  nu_rule: cell_id_mod_4
+  ssb_subcarrier_to_fft_bin: "(k - 120) mod 256"
+  internal_gather_index: "symbol * 256 + 16 * (bin mod 16) + floor(bin / 16)"
+  de_rotation: complex_elementwise_multiply
+  phases:
+    - cp_remove_iq_deinterleave
+    - dft16_left_mmad
+    - cooley_tukey_twiddle
+    - dft16_right_mmad
+    - scalar_gather_vector_derotate
+
+execution:
+  batch: 1
+  batch_parameter: compile_time_fixed
+  block_dim: 4
+  active_blocks: 1
+  active_block_rule: block_0_only
+  symbols_per_active_block: 3
+  m_mmad: 16
+  n_sub: 16
+  n_splits: 1
+  k_phase1: 16
+  k_phase3: 16
+  engines: [cube, vector, scalar, mte]
+  input_precision: int16_to_fp16
+  accumulator_precision: fp32
+  intermediate_precision: fp16
+  output_precision: fp16
+  tiling_mode: placeholder_not_consumed_by_kernel
+  workspace_consumed_by_kernel: false
+  warmup_iterations: 10
+  timed_iterations: 50
+
+commands:
+  generate: PYTHONDONTWRITEBYTECODE=1 python3 scripts/ssb_fft_ref.py
+  run_ascend310p3: bash run.sh -r npu -v Ascend310P3
+  run_ascend310p1: bash run.sh -r npu -v Ascend310P1
+  verify: PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_result.py
+
+correctness:
+  reference: scripts/ssb_fft_ref.py
+  comparison: componentwise_absolute_error_re_and_im
+  absolute_tolerance: 0.05
+  required_re_passed: 144
+  success_pattern: "[verify] ========== PASS (144/144) =========="
+  python_checks:
+    mixed_radix_vs_numpy_atol: 0.0001
+    four_real_vs_complex_atol: 0.0001
+    synthetic_dmrs_round_trip_atol: 0.001
+    pbch_dmrs_order_cross_check: optional_if_sibling_import_succeeds
+  historical_npu:
+    soc: Ascend310P3
+    status: pass_unrevalidated
+    passed_re: 144
+    total_re: 144
+    max_abs_error: 0.0034
+  clean_migration_npu_status: not_run_by_request
+  current_coverage_limits:
+    - standalone_case_uses_nu0_only
+    - generated_derotation_is_identity
+    - no_real_usrp_scale_case
+
+performance:
+  status: historical_needs_revalidation
+  metric_scope: kernel_launch_through_stream_synchronize
+  excludes: [h2d, d2h, python_verification, scratch_memset]
+  msprof_status: unavailable
+  historical_ascend310p3:
+    warmup_iterations: 10
+    timed_iterations: 50
+    latency_min_us: 49.5
+    latency_avg_us: 51.6
+    latency_p50_us: 50.5
+    latency_p99_us: 64.4
+    latency_max_us: 64.4
+  warning: historical_result_not_bound_to_commit_and_predates_cp_gather_reference_update
+
+generated_artifacts:
+  - weights/**/*.bin
+  - data/golden/**/*.bin
+  - data/ascend_output/**/*.bin
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - __pycache__/**
+
+known_limitations:
+  - inferred_operator_id_not_confirmed_by_original_registry
+  - standalone_runner_selects_only_default_nu0_gather
+  - generated_derotation_weights_are_identity
+  - fixed_q8_8_input_scale_not_revalidated_with_real_usrp_data
+  - optional_gate3_cross_check_skips_on_import_failure
+  - single_deterministic_npu_golden_case
+  - fixed_fft_cp_symbol_and_dmrs_dimensions
+  - gather_indices_are_not_bounds_checked_in_kernel
+  - tiling_and_workspace_are_abi_only
+  - source_comments_contain_stale_placeholder_and_old_size_text
+
+next_tasks:
+  - revalidate_clean_source_on_ascend310p3_and_capture_logs
+  - add_nu0_through_nu3_to_standalone_npu_regression
+  - make_pbch_dmrs_order_cross_check_mandatory
+  - add_non_identity_derotation_cfo_timing_noise_and_real_usrp_cases
+  - correct_stale_source_comments_in_a_separate_non_migration_change
+  - collect_msprof_pipeline_metrics_if_further_optimization_is_needed

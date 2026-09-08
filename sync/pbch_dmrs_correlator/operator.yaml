@@ -1,0 +1,179 @@
+schema_version: 1
+
+id: R3.5
+id_provenance: rx_chain_status_layer1_r3_5
+name: pbch_dmrs_correlator
+category: sync
+domain: sync
+chain: rx
+status: implemented_needs_clean_npu_revalidation
+knowledge_status: extracted_source_checked_historical_performance
+
+paths:
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/pbch_dmrs_correlator
+  source: kernels/sync/pbch_dmrs_correlator
+  knowledge: kernels/sync/pbch_dmrs_correlator/KNOWLEDGE.md
+  conversation: conversations/R3.5_pbch_dmrs_correlator.md
+
+target:
+  architecture: dav_m200
+  default_soc: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  cann:
+    configured_path: /usr/local/Ascend/ascend-toolkit/latest
+    migration_host_version_dir: 8.0.0
+    migration_host_compiler_version: 7.6.0.1.220
+    historical_benchmark_version: not_fully_recorded
+
+algorithm:
+  family: 5g_nr_pbch_dmrs_matched_correlation
+  standard_reference: 3GPP_TS_38_211_7_4_1_4
+  n_dmrs_re: 144
+  n_pcid: 1008
+  l_max_supported:
+    - 4
+    - 8
+  l_max_hardware_lanes: 8
+  cube_shape:
+    m: 16
+    k: 144
+    n: 16
+  real_m: 1
+  real_n: 8
+  complex_gemm_passes: 4
+  metric: corr_re_squared_plus_corr_im_squared
+  selection: argmax_over_l_max
+
+io:
+  inputs:
+    - name: r_re
+      dtype: fp16
+      shape: [16, 144]
+      layout: row_major_replicated_rows
+    - name: r_im
+      dtype: fp16
+      shape: [16, 144]
+      layout: row_major_replicated_rows
+    - name: d_re
+      dtype: fp16
+      shape: [144, 16]
+      layout: row_major_k_n
+    - name: d_im
+      dtype: fp16
+      shape: [144, 16]
+      layout: row_major_k_n
+    - name: d_im_neg
+      dtype: fp16
+      shape: [144, 16]
+      layout: row_major_k_n
+    - name: tiling
+      dtype: uint8
+      shape: [64]
+      semantic_fields: [l_max, pcid, block_dim]
+  outputs:
+    - name: output
+      dtype: fp32
+      shape: [24]
+      layout:
+        i_ssb: 0
+        peak: 1
+        second: 2
+        l_max_echo: 3
+        corr_re: [4, 12]
+        corr_im: [12, 20]
+        dbg_r_re_0: 20
+        dbg_d_re_00: 21
+        metric_max: 22
+        sentinel: 23
+
+execution:
+  batch: 1
+  block_dim: 4
+  active_blocks: 1
+  active_block_rule: block_0_only
+  engines: [cube, vector, scalar, mte]
+  input_precision: fp16
+  accumulator_precision: fp32
+  metric_precision: fp32
+  warmup_iterations: 5
+  timed_iterations: 20
+
+commands:
+  reference_self_test: PYTHONDONTWRITEBYTECODE=1 python3 scripts/pbch_dmrs_correlator_ref.py
+  generate: PYTHONDONTWRITEBYTECODE=1 python3 scripts/gen_test_cases.py
+  run: bash run.sh
+  run_case: bash run.sh -c case_4_low_snr_L8
+  verify_all: bash run.sh -a
+
+correctness:
+  clean_reference_self_test:
+    date: 2026-08-27
+    cases: 5
+    status: pass
+    bytecode_generated: false
+  current_pass_condition:
+    - int_output_0_equals_truth_i_ssb
+    - output_23_equals_7
+  comparison:
+    i_ssb: exact
+    sentinel: exact
+    peak_second_corr: informational_only
+  historical_npu_cases: 8
+  historical_npu_status: pass_unrevalidated
+  clean_migration_npu_status: not_run
+  required_improvements:
+    - enforce_l_max_echo
+    - reject_nan_and_inf
+    - enforce_peak_second_and_corr_tolerances
+    - add_independent_standard_reference
+
+performance:
+  status: historical_needs_rebenchmark
+  scope: host_wall_clock_launch_plus_stream_synchronize
+  historical:
+    p50_us_range: [29.0, 36.0]
+    min_us: 28.7
+    p99_us: 56.8
+    target_us: 50.0
+  msprof_status: no_report_migrated
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**
+  - data/ascend_output/**
+  - "**/__pycache__/**"
+  - "*.pyc"
+  - "*.bin"
+  - "*.npy"
+  - "*.npz"
+  - "*.zip"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+
+known_limitations:
+  - l_max_only_4_or_8_no_fr2_64
+  - single_pcid_single_ssb_batch
+  - pcid_tiling_field_not_used_by_kernel
+  - per_case_reference_subtable_upload
+  - host_prepares_transpose_padding_negation_and_r_replication
+  - kernel_does_not_validate_l_max
+  - current_pass_condition_does_not_enforce_numeric_debug_outputs
+  - debug_heavy_24_fp32_output_abi
+  - historical_performance_not_revalidated
+
+next_tasks:
+  - rerun_all_eight_cases_on_clean_tree
+  - tighten_numeric_verifier_and_nan_checks
+  - add_random_boundary_invalid_tiling_and_tie_tests
+  - validate_against_independent_3gpp_reference
+  - collect_msprof_and_full_environment_metadata
+  - benchmark_block_dim_1_under_controlled_conditions
+  - evaluate_device_resident_full_reference_table
+  - evaluate_device_side_r_broadcast
+  - reduce_output_to_production_abi
+  - integrate_sss_dmrs_extraction_pbch_decode_chain

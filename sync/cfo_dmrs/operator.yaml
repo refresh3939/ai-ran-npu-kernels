@@ -1,0 +1,203 @@
+schema_version: 1
+
+id: R14
+id_provenance: inferred_from_current_19_operator_rx_chain_index
+name: cfo_dmrs
+category: sync
+domain: sync
+chain: rx
+stage: post_ofdm_dmrs_residual_cfo_estimation
+status: implemented_needs_clean_revalidation
+knowledge_status: extracted_and_source_checked
+
+paths:
+  source: kernels/sync/cfo_dmrs
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/cfo_dmrs
+  knowledge: kernels/sync/cfo_dmrs/KNOWLEDGE.md
+  conversation: conversations/R14_cfo_dmrs.md
+  original_conversation: /home/refresh/下载/cfo_dmrs.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_cann_version: 8.0.0
+  locally_detected_cann_version: 8.0.0
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  inputs:
+    - name: y_re
+      dtype: float16
+      shape: [14, 1664]
+      logical_valid_shape: [14, 1596]
+      layout: split_real_symbol_major_zero_padded
+      bytes: 46592
+    - name: y_im
+      dtype: float16
+      shape: [14, 1664]
+      logical_valid_shape: [14, 1596]
+      layout: split_imag_symbol_major_zero_padded
+      bytes: 46592
+    - name: x_re
+      dtype: float16
+      shape: [2, 896]
+      logical_valid_shape: [2, 798]
+      layout: split_real_dmrs_symbol_major_zero_padded
+      bytes: 3584
+    - name: x_im
+      dtype: float16
+      shape: [2, 896]
+      logical_valid_shape: [2, 798]
+      layout: split_imag_dmrs_symbol_major_zero_padded
+      bytes: 3584
+    - name: scratch
+      dtype: uint8
+      shape: [128]
+      current_kernel_usage: unused_parameter
+    - name: workspace
+      dtype: uint8
+      shape: platform_lib_api_workspace
+      current_kernel_usage: unused_parameter
+    - name: tiling
+      dtype: uint8
+      shape: [128]
+      current_kernel_usage: unused_zero_placeholder
+  outputs:
+    - name: result
+      dtype: float32
+      shape: [8]
+      bytes: 32
+      fields:
+        - {index: 0, name: delta_f_hz, unit: Hz}
+        - {index: 1, name: c_re, unit: normalized_correlation}
+        - {index: 2, name: c_im, unit: normalized_correlation}
+        - {range: "3:7", name: padding}
+        - {index: 7, name: kernel_ran_sentinel, expected: 7.0}
+
+algorithm:
+  family: cross_dmrs_phase_rotation
+  method: normalized_ls_cross_symbol_correlation
+  formula: delta_f_hz=atan2(imag(sum(conj(H0)*H1)),real(sum(conj(H0)*H1)))/(2*pi*delta_t)
+  y_normalization: y/sqrt(abs_y_squared+1e-6)
+  fft_size: 2048
+  sample_rate_hz: 61440000
+  subcarrier_spacing_hz: 30000
+  symbols_per_slot: 14
+  active_subcarriers: 1596
+  padded_subcarriers: 1664
+  dmrs_symbols: [2, 11]
+  dmrs_comb: 2
+  dmrs_re_per_symbol: 798
+  padded_dmrs_re: 896
+  dmrs_symbol_distance: 9
+  delta_t_us: 321.09375
+  source_hz_per_rad: 495.6582031
+  derived_hz_per_rad_approx: 495.665
+  unambiguous_range_hz_approx: [-1557.18, 1557.18]
+  atan_implementation: CANN_high_level_Atan_plus_scalar_quadrant_restore
+
+execution:
+  batch:
+    unit: slot
+    size: 1
+    runtime_parameterized: false
+  block_dim: 1
+  engine: AIV_vector
+  aiv_mapping_xor_2: false
+  selected_aiv_id: 0
+  gather:
+    source_half_elements: 1664
+    repeat_times: 13
+    valid_even_outputs: 798
+  reduction:
+    dtype: float16
+    padded_elements: 896
+    first_stage: 7x128_to_7
+    second_stage: 7_to_1
+  normalization_math_dtype: float32
+  tiling: zero_placeholder_128_bytes
+  approximate_ub_bytes: 35000
+
+commands:
+  generate: python3 scripts/cfo_dmrs_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  status: source_adjacent_outputs_observed_clean_unverified
+  reference: numpy_synthetic_dmrs_cfo
+  reference_is_sionna: false
+  kernel_reference_model_mismatch: python_reference_does_not_apply_current_y_normalization
+  comparison: absolute_delta_f_error_hz_and_exact_sentinel
+  cases:
+    - {name: no_cfo, injected_hz: 0, tolerance_hz: 1}
+    - {name: small_positive, injected_hz: 200, tolerance_hz: 5}
+    - {name: large_negative, injected_hz: -1000, tolerance_hz: 5}
+    - {name: doppler_only, injected_hz: 0, doppler_hz: 100, tolerance_hz: 200}
+    - {name: cfo_plus_noise, injected_hz: 500, snr_db: 10, tolerance_hz: 50}
+  success_pattern: "Total: 5 / 5 PASS"
+  source_adjacent_output_observation:
+    output_timestamp: 2026-07-01T10:43:32+08:00
+    migration_offline_verify_passed: 5
+    total: 5
+    npu_rerun_performed_during_migration: false
+  static_note:
+    file: cfo_dmrs.h
+    issue: harmless_trailing_unicode_character_in_line_comment
+    token: 三
+    cxx_syntax_check: passed
+
+performance:
+  status: historical_needs_v2_revalidation
+  msprof_available: false
+  historical_v1:
+    soc: Ascend310P3
+    cann: 8.0.0
+    measurement_scope: host_wall_clock_kernel_launch_plus_stream_sync
+    warmup_runs: 10
+    timed_runs: 50
+    min_us: 29.3
+    average_us: 35.0
+    p50_us: 35.9
+    p99_us: 56.3
+    max_us: 56.3
+  notes:
+    - historical_v1_used_interleaved_cint16_input_and_14_complex_phasor_output
+    - current_v2_adds_fp32_y_normalization_and_has_not_been_benchmarked_in_clean_tree
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**/*.bin
+  - data/golden/**/meta.txt
+  - data/ascend_output/**/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "*.zip"
+
+known_limitations:
+  - cfo_dmrs_h_has_harmless_trailing_unicode_character_in_comment
+  - fixed_mu1_fft2048_fs61_44mhz_and_dmrs_symbols_2_11
+  - single_slot_single_antenna_no_runtime_batch
+  - approximately_plus_or_minus_1557_hz_unambiguous_range
+  - python_reference_missing_current_y_normalization
+  - source_hz_per_rad_slightly_differs_from_value_derived_from_declared_timing
+  - no_low_correlation_confidence_or_invalid_output_flag
+  - no_phase_unwrap_or_cross_slot_filter
+  - residual_cfo_is_not_fed_back_to_correction_in_current_operator
+  - no_clean_build_npu_run_or_msprof_during_migration
+
+next_tasks:
+  - optionally_clean_trailing_unicode_character_in_comment
+  - align_python_reference_with_y_normalization_and_hz_per_rad
+  - clean_build_and_run_five_case_regression_on_Ascend310P3
+  - add_zero_deep_fade_low_snr_wrap_boundary_and_determinism_cases
+  - add_normalized_correlation_confidence_and_invalid_status
+  - profile_current_v2_with_msprof_and_save_raw_logs
+  - design_device_side_filtered_feedback_if_long_duration_tracking_requires_it
+  - parameterize_numerology_dmrs_positions_antennas_and_slot_batch

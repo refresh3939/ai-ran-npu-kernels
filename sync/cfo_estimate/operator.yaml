@@ -1,0 +1,168 @@
+schema_version: 1
+
+id: R8
+id_provenance: inferred_from_current_19_operator_rx_chain_index
+name: cfo_estimate
+category: sync
+domain: sync
+chain: rx
+stage: pre_fft_fractional_cfo_tracking
+status: implemented_needs_clean_revalidation
+knowledge_status: extracted_and_source_checked
+
+paths:
+  source: kernels/sync/cfo_estimate
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/cfo_estimate
+  knowledge: kernels/sync/cfo_estimate/KNOWLEDGE.md
+  conversation: conversations/R8_cfo_estimate.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historical_cann_version: 8.0.0
+  build_cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+
+interface:
+  inputs:
+    - name: input_iq
+      dtype: int16
+      shape: [61440]
+      logical_shape: [30720, 2]
+      layout: interleaved_iq
+      quantization: Q8.8
+      bytes: 122880
+    - name: scratch
+      dtype: float32
+      shape: [32]
+      layout: four_32byte_per_aiv_slots
+      bytes: 128
+    - name: workspace
+      dtype: uint8
+      shape: platform_lib_api_workspace
+      current_kernel_usage: unused_parameter
+  outputs:
+    - name: result
+      dtype: float32
+      shape: [8]
+      bytes: 32
+      fields:
+        - {index: 0, name: R_re, unit: correlation}
+        - {index: 1, name: R_im, unit: correlation}
+        - {index: 2, name: delta_f_hz, unit: Hz}
+        - {range: "3:8", name: padding}
+
+algorithm:
+  family: moose_cp_autocorrelation
+  method: cp_based_fractional_cfo_estimation
+  estimate_formula: delta_f_hz=atan2(R_im,R_re)*scs_hz/(2*pi)
+  fft_size: 2048
+  scs_hz: 30000
+  sample_rate_hz: 61440000
+  symbols_per_slot: 14
+  samples_per_slot: 30720
+  cp_lengths:
+    first_symbol: 176
+    other_symbols: 144
+  unambiguous_range_hz: [-15000, 15000]
+  q_scale: 256
+  atan_implementation: CANN_high_level_Atan_plus_scalar_quadrant_restore
+
+execution:
+  batch:
+    unit: slot
+    size: 1
+    runtime_parameterized: false
+  block_dim: 4
+  engine: AIV_vector
+  symbols_per_core_max: 4
+  core_assignment:
+    aiv_0: [0, 1, 2, 3]
+    aiv_1: [4, 5, 6, 7]
+    aiv_2: [8, 9, 10, 11]
+    aiv_3: [12, 13]
+  aiv_mapping_xor_2: false
+  cross_core_reduce: scratch_GM_then_SyncAll
+  gm_visibility_event: MTE3_MTE2
+  reduction: fp32_scalar_GetValue_loop
+  tiling: zero_placeholder_128_bytes
+
+commands:
+  generate: python3 scripts/cfo_estimate_ref.py
+  run: bash run.sh -r npu -v Ascend310P3
+  verify: python3 scripts/verify_result.py
+
+correctness:
+  status: historical_pass_current_clean_unverified
+  reference: numpy_synthetic_ofdm_plus_npu_op_chain_model
+  reference_is_sionna_pusch: false
+  cases_hz: [0, 500, -1200, 5000, -10000]
+  comparison: absolute_cfo_error
+  tolerance: max(50_Hz,5_percent_of_abs_truth)
+  historical_stable_result:
+    soc: Ascend310P3
+    passed: 5
+    total: 5
+    max_truth_error_hz: 0.1948
+    max_kernel_reference_error_hz: 0.021484
+  migration_observation:
+    source_generated_outputs_match_stable_baseline: true
+    rerun_performed: false
+  required_regression_additions:
+    - R_complex_magnitude_and_phase_tolerance
+    - repeated_launch_determinism
+    - noise_multipath_and_timing_offset
+
+performance:
+  status: historical_needs_revalidation
+  measurement_scope: host_wall_clock_kernel_launch_plus_stream_sync
+  msprof_available: false
+  historical_stable:
+    soc: Ascend310P3
+    cann: 8.0.0
+    warmup_runs: 10
+    timed_runs: 50
+    min_us: 42.2
+    average_us: 43.8
+    p50_us: 43.1
+    p99_us: 56.4
+    max_us: 56.4
+    slot_budget_us: 1000
+    average_headroom_x: 22.8
+  rejected_optimized_path:
+    observed_p50_us: 29.2
+    reason: nondeterministic_R_complex_and_unresolved_post_sync_anomaly
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - data/golden/**/*.bin
+  - data/golden/**/meta.json
+  - data/ascend_output/**/*.bin
+  - prof/**
+  - prof_out/**
+  - profiling/**
+
+known_limitations:
+  - requires_known_symbol_and_cp_boundaries
+  - fractional_CFO_only_with_plus_or_minus_15kHz_range
+  - estimate_only_no_CFO_compensation
+  - fixed_mu1_fft2048_cp_lengths_and_Q8_8
+  - one_slot_one_antenna_no_runtime_batch
+  - synthetic_reference_does_not_cover_real_SDR_noise_or_multipath
+  - no_low_correlation_confidence_or_invalid_output_flag
+  - result_R_complex_not_part_of_current_pass_fail_criterion
+  - clean_migration_not_built_or_benchmarked
+
+next_tasks:
+  - regenerate_local_golden_and_revalidate_on_Ascend310P3
+  - record_git_commit_CANN_SOC_and_raw_logs
+  - make_R_complex_stability_a_hard_correctness_check
+  - add_AWGN_multipath_timing_and_range_boundary_cases
+  - profile_with_msprof_before_any_reduction_optimization
+  - add_normalized_correlation_confidence_and_invalid_flag
+  - validate_sign_convention_end_to_end_with_cfo_compensate
+  - parameterize_numerology_antenna_and_slot_batch

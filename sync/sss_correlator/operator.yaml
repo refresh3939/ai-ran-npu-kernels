@@ -1,0 +1,164 @@
+schema_version: 1
+
+id: R3
+name: sss_correlator
+category: sync
+chain: rx
+status: implemented_needs_clean_revalidation
+knowledge_status: extracted_and_source_checked
+
+paths:
+  source: kernels/sync/sss_correlator
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/sss_correlator
+  knowledge: kernels/sync/sss_correlator/KNOWLEDGE.md
+  conversation: conversations/R3_sss_correlator.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  historically_validated_soc: Ascend310P3
+  cann_version: unspecified_in_source_and_conversation
+
+chain_contract:
+  upstream: pss_correlator
+  downstream: pbch_dmrs_correlator
+  upstream_scalars:
+    mu_t_pss: pss_useful_start_sample
+    n_id_2: integer_0_to_2
+    g_hat: integer_minus1_to_plus1
+  derived_value: "pcid = 3 * n_id_1 + n_id_2"
+
+inputs:
+  - name: rx
+    dtype: int16
+    logical_dtype: cint16_q2_13
+    shape: [153600, 2]
+    layout: iq_interleaved
+  - name: sss_time_table
+    storage_dtype: int16
+    logical_dtype: cint16_q2_13
+    file_shape: [3, 336, 256, 2]
+    device_dtype: fp16
+    device_planes: [real, imag]
+    device_shape_per_plane: [3, 256, 336]
+    host_transform: transpose_nk_and_dequantize
+  - name: twiddle_g
+    storage_dtype: int16
+    logical_dtype: cint16_q2_13
+    file_shape: [3, 264, 2]
+    device_dtype: fp16
+    device_planes: [real, imag]
+  - name: tiling
+    dtype: bytes
+    shape: [64]
+    fields: [mu_t_pss, n_id_2, g_hat, sym2_start_nominal, seg_start, g_idx, block_dim]
+
+outputs:
+  - name: metadata
+    dtype: fp32
+    shape: [8]
+    fields:
+      - n_id_1
+      - pcid
+      - peak
+      - second
+      - tau_star
+      - reserved_0
+      - reserved_1
+      - sentinel_7
+
+algorithm:
+  family: 5g_nr_sss_joint_timing_and_identity_search
+  sample_rate_hz: 7680000
+  scs_hz: 30000
+  n_fft: 256
+  n_sss_subcarriers: 127
+  n_id_1_candidates: 336
+  n_id_2_candidates: 3
+  timing_half_window: 4
+  timing_candidates: 9
+  segment_length: 264
+  sym2_offset_from_mu_t_pss: 584
+  quantization: Q2.13
+  metric: complex_correlation_magnitude_squared
+  second_metric: max_over_other_n_id_1_after_tau_reduction
+
+execution:
+  batch: 1
+  batch_parameter: fixed
+  block_dim: 4
+  engine: mixed_vector_cube_scalar
+  m_mmad: 16
+  n_sub: 16
+  k_sub: 256
+  n_splits: 22
+  k_splits: 1
+  n_id_1_padded: 352
+  core_n_split_ranges:
+    - {block_id: 0, start: 0, end: 6}
+    - {block_id: 1, start: 6, end: 11}
+    - {block_id: 2, start: 11, end: 16}
+    - {block_id: 3, start: 16, end: 22}
+
+commands:
+  generate: "python3 scripts/sss_correlator_ref.py --output-dir ../../../data/golden/rx/sss_correlator"
+  reference_check: "python3 scripts/sss_correlator_ref.py --no-golden"
+  run: "bash run.sh -r npu -v Ascend310P3"
+  verify: "bash run_all_cases.sh"
+  static_shell_check: "bash -n run.sh && bash -n run_all_cases.sh"
+  static_python_check: "PYTHONDONTWRITEBYTECODE=1 python3 -c 'import ast, pathlib; ast.parse(pathlib.Path(\"scripts/sss_correlator_ref.py\").read_text())'"
+
+correctness:
+  reference_standard:
+    n_id_1: exact
+    tau_star: absolute_value_lte_2_samples
+    peak_to_second_ratio: greater_than_2
+    time_vs_frequency_reference: n_id_1_exact
+  current_npu_regression:
+    n_id_1: exact_vs_expected_json
+    tau_star: exact_vs_expected_json
+    cases: 8
+    missing_checks: [pcid, peak, second, peak_to_second_ratio, sentinel, finite_values]
+  migration_validation: static_only
+
+performance:
+  status: historical_needs_revalidation
+  measurement_scope: host_wall_clock_kernel_launch_plus_stream_synchronize
+  warmup_runs: 5
+  timed_runs: 20
+  historical_final:
+    soc: Ascend310P3
+    p50_us_range: [226.6, 233.5]
+    correctness: 8_of_8_cases_passed
+  msprof_status: not_available_in_conversation
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - data/golden/rx/sss_correlator/**
+  - data/ascend_output/**
+  - "**/__pycache__/**"
+  - "**/*.pyc"
+  - "**/*.bin"
+  - "**/prof*/**"
+  - "**/profiling/**"
+
+known_limitations:
+  - clean_migration_not_rebuilt_or_rebenchmarked
+  - fixed_7_68_msps_30khz_scs_and_256_point_ssb
+  - fixed_block_dim_4_and_manual_core_split
+  - bid_1_silent_failure_root_cause_unconfirmed_when_assigned_six_splits
+  - host_reads_upstream_scalars_from_truth_json
+  - cpu_debug_mode_not_implemented
+  - npu_regression_does_not_check_all_outputs
+  - historical_performance_not_bound_to_cann_version_or_commit
+  - source_contains_stale_comments_preserved_for_cmp_identity
+
+next_tasks:
+  - regenerate_golden_and_run_clean_eight_case_npu_regression
+  - extend_verifier_to_all_output_fields_and_numeric_thresholds
+  - capture_soc_cann_build_hash_logs_and_msprof
+  - isolate_bid_1_six_split_failure_with_minimal_probe
+  - connect_real_pss_device_output_instead_of_truth_json

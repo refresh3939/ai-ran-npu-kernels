@@ -1,0 +1,187 @@
+schema_version: 1
+
+id: R6
+name: re_demap_siso
+aliases: [re_demap]
+category: mapping
+chain: rx
+spatial_mode: siso
+status: implemented_needs_clean_npu_revalidation
+knowledge_status: extracted_current_source_checked
+
+paths:
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/re_demap
+  source: kernels/mapping/re_demap_siso
+  knowledge: kernels/mapping/re_demap_siso/KNOWLEDGE.md
+  conversation: conversations/R6_re_demap.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P3
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  observed_cann_version: 8.0.0
+  cann_version_status: observed_from_original_build_and_local_latest_symlink_not_clean_revalidated
+
+interface:
+  batch: one_slot_per_launch
+  inputs:
+    - name: in_re
+      dtype: float16
+      shape: [14, 2048]
+      layout: symbol_major_raw_stage4_k1_k2
+    - name: in_im
+      dtype: float16
+      shape: [14, 2048]
+      layout: symbol_major_raw_stage4_k1_k2
+    - name: gather_idx
+      dtype: uint32
+      shape: [1664]
+      layout: fp16_byte_offsets
+      generated_by: scripts/re_demap_ref.py
+    - name: ws
+      dtype: uint8
+      host_allocated_bytes: 1024
+      role: unused_dummy_tail_parameter
+    - name: tiling
+      dtype: uint8
+      host_allocated_bytes: 1024
+      role: unused_dummy_tail_parameter
+  outputs:
+    - name: out_re
+      dtype: float16
+      shape: [14, 1664]
+      layout: symbol_major_natural_used_sc
+      valid_region: "subcarriers [0,1596)"
+      padding_region: "[1596,1664) copies raw input element 0; not guaranteed zero"
+    - name: out_im
+      dtype: float16
+      shape: [14, 1664]
+      layout: symbol_major_natural_used_sc
+      valid_region: "subcarriers [0,1596)"
+      padding_region: "[1596,1664) copies raw input element 0; not guaranteed zero"
+
+algorithm:
+  family: resource_element_demapping
+  implementation: ascendc_gather_pure_permutation
+  fft_size: 2048
+  symbols_per_slot: 14
+  resource_blocks: 133
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+  left_guard_bins: 226
+  right_guard_bins: 226
+  dc_null: false
+  dc_null_status: assumed_needs_final_resource_grid_confirmation
+  mixed_radix_p: 32
+  mixed_radix_q: 64
+  natural_bin_to_raw_element: "64 * (n % 32) + floor(n / 32)"
+  gather_offset_unit: byte
+  padding_index_value_bytes: 0
+  arithmetic: none
+
+execution:
+  batch_parameter: fixed_one_slot
+  block_dim: 4
+  symbols_per_core: 4
+  symbol_assignment: contiguous_4_4_4_2
+  gather_calls_per_slot: 28
+  source_elements_per_gather: 2048
+  destination_elements_per_gather: 1664
+  index_loaded_once_per_core: true
+  ub_buffers_bytes:
+    source: 4096
+    destination: 3328
+    index: 6656
+    total: 14080
+  workspace_used_by_kernel: false
+  tiling_used_by_kernel: false
+
+commands:
+  generate: python3 scripts/re_demap_ref.py
+  run_default: bash run.sh -r npu -v Ascend310P3
+  run_ascend310p1: bash run.sh -r npu -v Ascend310P1
+  verify: python3 scripts/verify_result.py
+  regenerate_after_index_change: python3 scripts/re_demap_ref.py
+
+correctness:
+  reference: numpy_gather_reference
+  comparison: bit_exact_per_element
+  absolute_tolerance: 0
+  required_symbols_passed: 14
+  success_pattern: "[verify] ========== PASS (14/14) =========="
+  clean_migration_validation: static_only
+  existing_artifact_replay:
+    status: observed_cmp_equal_re_and_im
+    npu_relaunched_during_migration: false
+  index_formula_static_check:
+    status: verified
+    entries: 1664
+    unique_valid_entries: 1596
+    valid_byte_offset_min: 0
+    valid_byte_offset_max: 4094
+    padding_entries: 68
+    padding_value: 0
+
+performance:
+  status: historical_needs_clean_rebenchmark
+  measurement_scope: host_clock_kernel_launch_plus_stream_synchronize
+  warmup_runs: 10
+  timed_runs: 50
+  msprof_available: false
+  historical_current_algorithm_1664:
+    soc: Ascend310P3
+    min_us: 28.8
+    avg_us: 50.5
+    p50_us: 32.4
+    p99_us: 299.0
+    max_us: 299.0
+    correctness: pass_14_of_14_bit_exact
+  historical_1600:
+    min_us: 28.5
+    avg_us: 35.4
+    p50_us: 29.4
+    p99_us: 94.7
+    max_us: 94.7
+  rejected_failed_output_run:
+    p50_us: 703.4
+    reason: out_re_was_not_written_and_correctness_failed
+
+generated_artifacts:
+  - weights/gather_idx.bin
+  - data/golden/*.bin
+  - data/ascend_output/*.bin
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - "**/__pycache__/**"
+  - "*.pyc"
+  - "*.o"
+  - "*.so"
+  - "*.a"
+  - "*.zip"
+
+known_limitations:
+  - fixed_14_symbols_fft2048_133rb_geometry
+  - used_subcarrier_dc_and_guard_assumption_not_confirmed_against_final_sionna_resource_grid
+  - coupled_to_ofdm_raw_stage4_k1_k2_layout
+  - padding_copies_input_element_zero_instead_of_zero_fill
+  - generated_gather_table_can_be_stale_because_run_sh_only_checks_file_existence
+  - workspace_and_tiling_are_unused_dummy_abi_parameters
+  - host_acl_error_macro_logs_but_does_not_abort
+  - no_clean_npu_revalidation
+  - no_msprof_data
+  - reference_and_verifier_docstrings_still_mention_old_1600_shape
+
+next_tasks:
+  - confirm_used_subcarrier_mapping_against_final_sionna_resource_grid
+  - rerun_clean_correctness_on_ascend310p3_and_record_environment_and_source_hash
+  - optionally_validate_on_ascend310p1
+  - fix_stale_1600_docstrings_and_document_nonzero_padding_contract
+  - make_generated_index_invalidation_configuration_or_hash_aware
+  - align_padding_contract_with_channel_estimate_and_equalizer
+  - collect_msprof_only_if_chain_profiling_shows_re_demap_is_a_bottleneck

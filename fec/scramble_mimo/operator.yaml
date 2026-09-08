@@ -1,0 +1,67 @@
+schema_version: 1
+
+id: T07
+name: scramble_mimo
+variant: mimo_batch
+category: fec
+domain: fec
+chain: tx
+stage: pusch_data_scrambling_before_qam
+status: implemented_and_clean_npu_verified
+
+paths:
+  original_source: /home/refresh/AI-RAN-NPU/kernels/tx/scramble_mimo
+  source: kernels/fec/scramble_mimo
+  readme: kernels/fec/scramble_mimo/README.md
+
+target:
+  architecture: dav_m200
+  default_soc_version: Ascend310P1
+  supported_soc_versions: [Ascend310P1, Ascend310P3]
+  block_dim: 4
+
+io:
+  input:
+    name: bits_nr
+    dtype: int16
+    values: [0, 1]
+    shape: [num_slots, 8, codeword_stride]
+    stream_order: canonical_nr_bit_0_through_7
+  output:
+    name: bits_qam
+    dtype: int16
+    values: [0, 1]
+    shape: [num_slots, 8, codeword_stride]
+    stream_order: grouped_i0_i1_i2_i3_q0_q1_q2_q3
+  valid_symbols_per_stream: num_layers_times_19152
+  storage_stride_per_stream: num_layers_times_19200
+  output_padding: zero
+
+algorithm:
+  standard: 3GPP_TS_38_211_6_3_1_1
+  operation: bit_xor_gold
+  c_init: rnti_shift15_or_codeword_index_shift14_or_data_scrambling_id
+  qam_stream_to_nr_bit: [0, 2, 4, 6, 1, 3, 5, 7]
+  fused_operations:
+    - canonical_nr_to_grouped_iq_stream_permutation
+    - output_tail_clear
+
+execution:
+  form: native_single_launch_slot_batch
+  supported_rank: [1, 2, 3, 4]
+  max_slots: 23
+  tile_elements: 6384
+  tiling_bytes: 128
+  workspace_bytes: 128
+  build_and_verify: bash run.sh
+
+correctness:
+  golden_reference: scripts/gen_data.py
+  verifier: scripts/verify_result.py
+  checks:
+    - independent_python_and_cpp_gold_match
+    - rank_1_through_4_bit_exact
+    - slot_batch
+    - stream_permutation_inverse
+    - xor_involution
+    - zero_padding

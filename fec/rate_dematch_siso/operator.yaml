@@ -1,0 +1,213 @@
+schema_version: 1
+
+id: R11
+name: rate_dematch_siso
+aliases: [rate_dematch]
+category: fec
+domain: fec
+chain: rx
+spatial_mode: siso
+status: optimized_v5_npu_verified
+knowledge_status: extracted_and_source_checked
+
+paths:
+  source: kernels/fec/rate_dematch_siso
+  origin: /home/refresh/AI-RAN-NPU/kernels/rx/rate_dematch
+  knowledge: kernels/fec/rate_dematch_siso/KNOWLEDGE.md
+  conversation: conversations/R11_rate_dematch.md
+
+target:
+  architecture: dav_m200
+  supported_soc_versions:
+    - Ascend310P1
+    - Ascend310P3
+  cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+  exact_cann_version: "7.6.0.1.220:8.0.0"
+
+interfaces:
+  inputs:
+    - name: descram_gm
+      dtype: int16
+      q_format: Q11.5
+      shape: [23, 8, 19200]
+      layout: slot_nr_bit_compact_re
+      stream_order: canonical_nr_bit_0_through_7
+      valid_re_per_stream_per_slot: 19152
+      padding_re_per_stream_per_slot: 48
+    - name: aux0_gm
+      dtype: opaque_alias
+      shape: []
+      used: false
+      purpose: launch_abi_placeholder
+    - name: aux1_gm
+      dtype: opaque_alias
+      shape: []
+      used: false
+      purpose: launch_abi_placeholder
+  outputs:
+    - name: lam_out_gm
+      dtype: int16
+      q_format: Q8.8
+      shape: [143, 26112]
+      layout: code_block_ldpc_position
+
+algorithm:
+  standard: 3gpp_ts_38_212_section_5_4_2
+  family: 5g_nr_ldpc_rate_dematching
+  base_graph: BG1
+  lifting_size: 384
+  modulation_order_qm: 8
+  layers: 1
+  redundancy_version: 0
+  k0: 0
+  code_blocks: 143
+  ldpc_k: 8448
+  ldpc_n: 26112
+  punctured_prefix_2z: 768
+  circular_buffer_ncb: 25344
+  filler_supported: false
+  harq_combining_supported: false
+  lbrm_supported: false
+  repetition_supported: false
+  n_slot: 23
+  valid_re_per_slot: 19152
+  padded_re_per_stream: 19200
+  total_coded_bits_g: 3523968
+  e_distribution:
+    - code_blocks: 87
+      e: 24640
+      eq: 3080
+    - code_blocks: 56
+      e: 24648
+      eq: 3081
+  llr_scale: 8
+  llr_clip: 5120
+
+execution:
+  batch_scope: one_transport_block
+  batch_parameter: compile_time
+  code_blocks_per_batch: 143
+  block_dim: 4
+  cb_assignment: cb_equals_aiv_id_plus_k_times_4
+  logical_aiv_mapping: get_block_idx_xor_2
+  packing_strategy: eight_contiguous_stream_slice_vector_copies
+  gather_used: false
+  input_ring_depth: 2
+  input_prefetch: next_cb_mte2_overlaps_current_vector
+  padding_clear: none_for_low_16_elements_for_high
+  output_sync: same_iteration_pipe_all_before_and_after_mte3
+  ub_static_bytes: 150816
+  ub_static_kib: 147.28125
+  runtime_tiling_used: false
+  host_zero_initialization_required: true
+
+commands:
+  working_directory: kernels/fec/rate_dematch_siso
+  reference_check: python3 scripts/rate_dematch_ref.py
+  generate: python3 scripts/build_kernel_artifacts.py
+  run_npu_310p1: bash run.sh -r npu -v Ascend310P1
+  run_npu_310p3: bash run.sh -r npu -v Ascend310P3
+  sionna_check_after_fix: python3 scripts/sionna_validate.py
+
+correctness:
+  reference: numpy_forward_inverse_roundtrip
+  kernel_reference: scripts/build_kernel_artifacts.py
+  npu_comparison: elementwise_bit_exact
+  tolerance: 0
+  compared_elements: 3734016
+  current_migration_reference_status: verified
+  current_migration_npu_status: verified_ascend310p1_tol0
+  sionna_status: current_e_dynamic_api_and_result_need_confirmation
+
+performance:
+  status: current_geometry_measured_ascend310p1
+  current_geometry_measurement:
+    measured_at: "2026-09-06"
+    device: Ascend310P1
+    n_slot: 23
+    protocol: 5_alternating_ab_runs_each_5_warmup_then_50x10_launch_sync
+    v3_v4_campaign_v3_median_us_per_tb:
+      p50: 852.9
+      min: 834.5
+      p90: 861.6
+    v3_v4_campaign_v4_median_us_per_tb:
+      p50: 811.8
+      min: 790.8
+      p90: 819.4
+    v4_p50_us_per_slot: 35.30
+    v3_v5_campaign_v3_median_us_per_tb:
+      p50: 845.9
+      min: 832.5
+      p90: 862.6
+    v3_v5_campaign_v5_median_us_per_tb:
+      p50: 117.5
+      min: 115.8
+      p90: 133.6
+    v5_p50_us_per_slot: 5.11
+    v5_vs_same_batch_v3_p50_reduction_us_per_tb: 728.4
+    v5_vs_same_batch_v3_p50_reduction_percent: 86.11
+    v5_vs_same_batch_v3_speedup: 7.199
+    v5_vs_v4_p50_reduction_us_per_tb: 694.3
+    v5_vs_v4_p50_reduction_percent: 85.53
+    v5_vs_v4_speedup: 6.909
+  historical_geometry:
+    n_slot: 41
+    n_sym: 10960
+    n_sym_pad: 11264
+  historical_results:
+    - version: v1_chunked_gather
+      p50_us_per_tb: 939.9
+      min_us_per_tb: 922.8
+      p90_us_per_tb: 952.8
+    - version: v2_one_shot_gather
+      p50_us_per_tb: 865.6
+      min_us_per_tb: 851.1
+      p90_us_per_tb: 873.6
+    - version: v3_level0_vector_ops
+      p50_us_per_tb: 869.8
+      min_us_per_tb: 855.3
+      p90_us_per_tb: 877.7
+  current_optimization:
+    version: v5_rate_match_style_gather_free
+    status: npu_bit_exact_and_benchmarked
+    measured_latency_us_per_tb_p50: 117.5
+    changes:
+      - double_buffer_aligned_input_blocks
+      - recognize_each_input_stream_as_one_contiguous_e_slice
+      - replace_random_gather_with_eight_contiguous_vector_copies
+      - remove_template_and_offset_ub
+      - clear_only_high_class_padding
+  profiler_status: no_msprof_artifacts_in_conversation
+  bottleneck_status: gather_path_macro_bottleneck_verified_no_pipe_profile
+  bottleneck_hypothesis: eliminated_ub_random_access_gather
+  stale_metric: historical_tb_latency_divided_by_41_slots
+
+generated_artifacts:
+  - data/golden/rx/rate_dematch/*.bin
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_out/**
+  - profiling/**
+  - __pycache__/**
+  - scripts/__pycache__/**
+
+known_limitations:
+  - fixed_compile_time_geometry
+  - only_bg1_z384_qm8_single_layer_143_code_blocks
+  - only_rv0_k0_zero
+  - no_filler_harq_combining_lbrm_or_repetition
+  - host_must_zero_full_output_before_launch
+  - sionna_validation_not_run_in_target_environment
+  - v5_ub_static_budget_is_147_3_kib
+  - current_results_only_verified_on_one_ascend310p1
+  - no_current_msprof_breakdown
+
+next_tasks:
+  - run_sionna_validation_in_target_environment
+  - repeat_bit_exact_and_benchmark_on_ascend310p3
+  - run_long_thermal_stable_v3_v5_ab_benchmark
+  - capture_msprof_to_measure_mte2_vector_copy_scale_clip_and_mte3_shares
+  - add_runtime_geometry_rv_filler_repetition_and_harq_support
+  - validate_descramble_rate_dematch_ldpc_decode_end_to_end

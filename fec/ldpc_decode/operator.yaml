@@ -1,0 +1,229 @@
+schema_version: 1
+
+id: R12
+name: ldpc_decode
+category: fec
+chain: rx
+status: implemented_verified_four_aic
+knowledge_status: source_checked_conversation_consolidated
+
+paths:
+  original_source: /home/refresh/AI-RAN-NPU/kernels/rx/ldpc_decode
+  source: kernels/fec/ldpc_decode
+  readme: kernels/fec/ldpc_decode/README.md
+  knowledge: kernels/fec/ldpc_decode/KNOWLEDGE.md
+  conversation: conversations/R12_ldpc_decode.md
+  conversation_history:
+    - conversations/R12_ldpc_decode.md
+    - conversations/R12_ldpc_decode_v2.md
+    - conversations/R12_ldpc_decode_v3.md
+
+target:
+  architecture: dav_m200
+  soc:
+    - Ascend310P1
+    - Ascend310P3
+  cann_path_default: /usr/local/Ascend/ascend-toolkit/latest
+  cann_version: latest_at_build_time
+  kernel_language: Ascend C
+  launch_api: ACLRT_LAUNCH_KERNEL
+
+algorithm:
+  family: 5g_nr_qc_ldpc
+  implementation: layered_normalized_min_sum
+  base_graph: BG1
+  lifting_size: 384
+  information_block_columns: 22
+  check_block_rows: 46
+  full_block_columns: 68
+  qc_edges: 316
+  check_degrees: [3, 4, 5, 6, 7, 8, 9, 10, 19]
+  max_check_degree: 19
+  information_bits_per_cb: 8448
+  transmitted_bits_per_cb: 25344
+  full_graph_bits_per_cb: 26112
+  punctured_prefix_bits: 768
+  normalization_alpha: 0.75
+  max_iterations: 3
+  early_termination: false
+  crc_in_kernel: false
+  llr_scale: 256
+  final_llr_clip_fixed: 5120
+  llr_sign: positive_means_bit_0
+  check_update: exact_min1_min2
+  posterior_saturation: final_export_only
+
+io:
+  inputs:
+    - name: lam_in
+      dtype: int16
+      shape: [143, 26112]
+      layout: cb_full_graph_flat_q8_8
+    - name: packed_bc
+      dtype: int16
+      shape: [46, 19]
+      layout: block_row_edge_padded
+    - name: packed_s
+      dtype: int16
+      shape: [46, 19]
+      layout: block_row_edge_padded
+    - name: degrees
+      dtype: int16
+      shape: [46]
+    - name: edge_offsets
+      dtype: int32
+      shape: [47]
+      role: abi_compatibility
+    - name: prev_msg
+      dtype: int8
+      shape: [143, 316, 384]
+      role: mutable_cn_to_vn_state_zero_before_independent_run
+    - name: lam_scratch
+      dtype: int16
+      shape: [4, 26112]
+      role: abi_compatibility_current_kernel_does_not_read_or_write
+  outputs:
+    - name: decoded_bits
+      dtype: int8
+      shape: [143, 8448]
+      layout: cb_information_bits_flat
+    - name: lam_out
+      dtype: int16
+      shape: [143, 26112]
+      layout: cb_full_graph_flat_q8_8
+      role: posterior_debug_output
+
+execution:
+  batch_kind: compile_time_fixed
+  batch_code_blocks: 143
+  block_dim: 4
+  core_type: AI_CORE
+  cb_group: 2
+  cb_assignment: contiguous_window_per_core
+  logical_core_id: GetBlockIdx_xor_2
+  posterior_compute_dtype: float16
+  message_storage_dtype: int8
+  vector_axis: lifting_dimension
+  vector_repeat_width: 128
+  row_dispatch_groups: 36
+  fused_disjoint_row_pairs: 10
+  shift_dispatch_classes:
+    - zero
+    - aligned_16_elements
+    - nonaligned_vector_copy
+  shift_plans:
+    - first_iteration
+    - steady_state
+  nonaligned_shift_passes_before: 1260
+  nonaligned_shift_passes_current: 781
+  posterior_layout: moving_last_incident_edge_coordinate
+  row_workspace_layout: edge_row_cb_z
+  row_message_storage: gm_streamed_int8_two_ub_slots
+  hard_decision: fused_in_kernel
+  cube_used: false
+
+commands:
+  prerequisite: provide data/weights/ldpc_bg1_z384_shifts/shift_table.bin
+  generate: conda run -n sionna python scripts/gen_data.py --snr-list 3 5 10
+  build_run_verify: bash run.sh -r npu -v Ascend310P1 -s 5
+  run_ascend310p3: bash run.sh -r npu -v Ascend310P3 -s 5
+  verify_only: AIRAN_DATA_DIR="$PWD/data/snr_5db" AIRAN_OUTPUT_DIR="$PWD/data/ascend_output" python3 scripts/verify_result.py
+  profile: bash run.sh -r npu -v Ascend310P1 -s 5 -p
+
+correctness:
+  truth: data/snr_<snr>db/info_bits.bin
+  actual: data/ascend_output/decoded_bits.bin
+  comparison: information_bit_error_rate
+  pass_threshold: 0.0005
+  pass_threshold_percent: 0.05
+  posterior_bit_exact_required: false
+  migration_static_validation: passed
+  clean_npu_rerun: false
+  source_workspace_current_code_results:
+    snr_3_db:
+      information_bit_errors: 2952
+      ber_percent: 0.2444
+      matches_saved_baseline: true
+    snr_5_db:
+      information_bit_errors: 0
+      matches_saved_baseline: true
+    snr_10_db:
+      information_bit_errors: 0
+      matches_saved_baseline: true
+
+performance:
+  status: verified_in_source_workspace_not_rerun_after_clean_migration
+  date: 2026-09-03
+  soc: Ascend310P1
+  cann: latest_at_measurement
+  batch_code_blocks: 143
+  iterations: 3
+  block_dim: 4
+  cb_group: 2
+  host_median_ms_range: [7.23, 7.29]
+  latest_host_median_ms: 7.2672
+  unoptimized_host_median_ms: 10.542
+  representative_msprof:
+    task_time_ms: 6.824119
+    aicore_time_ms: 6.784530
+    vector_time_ms: 5.608520
+    vector_ratio: 0.827
+    scalar_time_ms: 3.539221
+    scalar_ratio: 0.522
+    mte2_time_ms: 0.255652
+    mte3_time_ms: 0.524370
+    icache_miss_rate: 0.005
+    memory_bound: 0.046
+    cube_utilization_percent: 0.0
+  planning_estimates_unverified:
+    four_core_realistic_host_ms: [5.8, 6.3]
+    four_core_stretch_host_ms: [5.3, 5.7]
+  rejected_results:
+    single_min_host_ms: 5.71
+    single_min_ber_percent: 11.1932
+    basic_mix_aic_aiv_host_ms: [4.08, 4.11]
+    basic_mix_aic_aiv_ber_percent: 49.97
+  observed_not_merged:
+    eight_aic_host_ms: [3.86, 3.89]
+    correctness: passed
+    reason: changes_fixed_four_core_configuration
+  note: Vector_Scalar_and_MTE_pipe_times_overlap_and_must_not_be_summed
+
+generated_artifacts:
+  - build/**
+  - out/**
+  - auto_gen/**
+  - prof/**
+  - prof_*/**
+  - profiling/**
+  - data/**
+  - '**/__pycache__/**'
+  - '*.pyc'
+  - '*.o'
+  - '*.so'
+  - '*.a'
+  - '*.zip'
+
+known_limitations:
+  - only_BG1_Z384
+  - batch_is_compile_time_143
+  - iterations_are_compile_time_3
+  - block_dim_is_fixed_4
+  - no_syndrome_early_termination
+  - no_crc_in_kernel
+  - shift_table_binary_not_versioned_or_self_contained
+  - fp16_posterior_and_int8_messages_not_sionna_trajectory_bit_exact
+  - deferred_saturation_not_formally_proven_for_all_inputs
+  - legacy_verify_py_uses_stale_staging_layout
+  - per_br_pipe_py_hardcodes_original_repository_path
+  - vector_is_current_critical_path
+  - standalone_AIV_not_correctly_integrated
+
+next_tasks:
+  - reduce_remaining_nonaligned_shift_vector_passes_without_changing_bits
+  - explore_larger_conflict_free_row_groups_with_equivalence_checks
+  - move_static_graph_and_shift_plans_to_validated_host_tiling_if_profitable
+  - prototype_GE_custom_operator_host_tiling_for_correct_AIC_AIV_partition
+  - add_self_contained_BG1_Z384_shift_table_generation_and_syndrome_check
+  - expand_multi_seed_boundary_LLR_and_deferred_saturation_AB_tests
+  - retire_or_fix_legacy_verification_scripts

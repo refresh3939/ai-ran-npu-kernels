@@ -1,0 +1,81 @@
+schema_version: 1
+name: channel_est_lmmse_mimo
+version: 1
+backend: ascendc
+soc: Ascend310P1
+public_types: ../../common/pusch_mimo_types.h
+abi_version_symbol: airan::PUSCH_MIMO_ABI_VERSION
+config_type: airan::PuschMimoConfig
+layout_type: airan::PuschMimoLayout
+runtime_config_type: airan::PuschMimoRuntimeConfig
+runtime_config_loading: optional_env_fail_closed_before_acl_init
+compile_variant_cross_check: [CE_NR, CE_NL]
+
+inputs:
+  - {name: h_ls_re, dtype: fp16, shape: [NR, L, 2, 832], layout: natural}
+  - {name: h_ls_im, dtype: fp16, shape: [NR, L, 2, 832], layout: natural}
+  - {name: pilot_count, dtype: uint16, shape: [L, 2]}
+  - {name: pilot_sc, dtype: uint16, shape: [L, 2, 832]}
+outputs:
+  - {name: h_grid_re, dtype: fp16, shape: [NR, 16, 14, 1664]}
+  - {name: h_grid_im, dtype: fp16, shape: [NR, 16, 14, 1664]}
+
+producer: mimo_dmrs_ls
+consumer: mimo_detect_io_pack
+active_layer_rule: "layers [0,L) contain estimates; layers [L,16) are zero"
+host_validation: airan::channel_est_lmmse::ValidateOpArgs
+
+device_stages:
+  - channel_est_lmmse_pack_natural_kernel
+  - channel_est_lmmse_kernel
+  - channel_est_lmmse_pad_layers_kernel
+
+profiles:
+  rank1_798:
+    layers: 1
+    dmrs_ports: [1000]
+    observation_count: 798
+    behavior: supported
+  rank2_disjoint_798:
+    layers: 2
+    dmrs_ports: [1000, 1002]
+    observation_count: [798, 798]
+    weight_scope: per_layer
+    behavior: supported
+  rank3_mixed_399_798:
+    layers: 3
+    dmrs_ports: [1000, 1001, 1002]
+    observation_count: [399, 399, 798]
+    weight_scope: per_layer
+    observation_399: two_support_arithmetic_mean
+    behavior: supported
+  rank4_shared_comb_399:
+    layers: 4
+    dmrs_ports: [1000, 1001, 1002, 1003]
+    observation_count: [399, 399, 399, 399]
+    weight_scope: per_layer
+    observation_399: two_support_arithmetic_mean
+    behavior: supported
+
+constraints:
+  num_rx_antennas: [8, 16, 32, 64]
+  active_layers: [1, 2, 3, 4]
+  num_symbols: 14
+  num_dmrs_symbols: 2
+  used_subcarriers: 1596
+  padded_subcarriers: 1664
+  pilot_stride: 832
+  retained_rank: {min: 16, max: 128, multiple_of: 16}
+  retained_rank_scope: implementation_variant_not_radio_profile
+
+verification:
+  host_contract: channel_est_lmmse_host_contract
+  independent_observation_reference: scripts/observation_model_ref.py
+  npu_reference: scripts/channel_est_lmmse_ref.py
+  npu_verifier: scripts/channel_est_lmmse_verify.py
+  rank1_npu: {status: pass, max_abs: 0.00050331, nrmse: 0.00027177}
+  rank2_npu: {status: pass, max_abs: 0.00050331, nrmse: 0.00027095}
+  rank3_npu: {status: pass, max_abs: 0.00097656, nrmse: 0.00026655}
+  rank4_npu: {status: pass, max_abs: 0.00098416, nrmse: 0.00026661}
+  inactive_layers_positive_zero: pass
+  consumer_mimo_detect_io_pack: accepted
