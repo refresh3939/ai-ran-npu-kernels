@@ -1,0 +1,27 @@
+{
+  "schema": "airan.mimo_detect_io_pack.evidence.v1",
+  "date": "2026-09-10",
+  "device": "Ascend310P1",
+  "rx_storage": 64,
+  "layer_storage": 16,
+  "active_rank": 4,
+  "num_pusch_configs": 1,
+  "implementation": "mixed_radix_vnchwconv_4_aicore",
+  "p50_us": 8589.5,
+  "outputs": {
+    "hrm_re.bin": {"bytes": 47710208, "sha256": "fd1300d3c174ceaff6af1292b630446a606380c59d4d77eb861212887026df83"},
+    "hrm_im.bin": {"bytes": 47710208, "sha256": "e6e6912359f54b442eabd129fb2e9640cb02178833aa2251cc59e773f5bfdddf"},
+    "yvpad_re.bin": {"bytes": 47710208, "sha256": "ae869d4fa5a6d762bee4e665b2c1aefee1a568ffc329dcf4310084000cb7166c"},
+    "yvpad_im.bin": {"bytes": 47710208, "sha256": "79dcfe03ef916d671e8f5ff492ab9abbc4af4ae225c84ff101c6655d8e26ff6a"},
+    "no.bin": {"bytes": 46592, "sha256": "d6795f6cf9d841d7fa7530c387e6b3c3945578d358b1bd97ddecb59c585854c5"}
+  },
+  "checks": {
+    "all_outputs_fp16_storage_bit_exact": true,
+    "active_layers_match_input": true,
+    "inactive_layers_4_to_15_positive_zero": true,
+    "full_yvpad_storage_width": true,
+    "fp32_noise_mean": true,
+    "single_pusch_plan": true
+  },
+  "status": "PASS"
+}

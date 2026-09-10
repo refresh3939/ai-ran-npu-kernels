@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file qam256_demod_batch.h
+ * Stable Rank-1..4 PUSCH 256-QAM batch demapper.
+ */
 #pragma once
 
 #include <cstddef>
@@ -22,12 +22,12 @@ constexpr uint32_t N_SC_LLR_PAD = 1600;
 constexpr uint32_t N_DATA_RE = N_DATA_SYMBOLS * N_SC_USED;
 constexpr uint32_t LLR_LAYER_STRIDE = N_DATA_SYMBOLS * N_SC_LLR_PAD;
 constexpr uint32_t GRID_LAYER_STRIDE = N_SYMBOLS * N_SC_GRID_PAD;
-
+// Four fixed AIVs, each owning three data OFDM symbols for every layer.
 constexpr uint32_t BLOCK_DIM = 4;
 constexpr uint32_t DMRS_SYMBOL_MASK = (1u << 2) | (1u << 11);
 constexpr size_t TILING_BYTES = 128;
-
-
+// Kept compatible with qam_demod_256's generated HAVE_WORKSPACE ABI. The
+// selected pairwise kernel currently does not touch it.
 constexpr size_t WORKSPACE_BYTES = 3 * 1024 * 1024;
 
 using PuschMimoConfig = ::airan::PuschMimoConfig;
@@ -42,8 +42,8 @@ enum Status : int32_t {
     LAUNCH_FAILED = -5,
 };
 
-
-
+// Standard chain interface. The output is deliberately the native physical
+// SISO-kernel layout [L,Qm,12,1600], not a compact 19152-element view.
 struct QamDemod256BatchOpArgsV1 {
     uint16_t abi_version;
     uint16_t struct_size;
@@ -56,8 +56,8 @@ struct QamDemod256BatchOpArgsV1 {
     void *stream;
 };
 
-
-
+// Private descriptor for the native batch kernel. num_layers is runtime data;
+// the remaining geometry is fixed by the canonical full-grid profile.
 struct BatchTilingData {
     int32_t n_sc_used;
     int32_t n_sc_pad;
@@ -82,9 +82,9 @@ Status BuildCurrentProfile(const PuschMimoConfig &config,
 
 Status ValidateOpArgs(const QamDemod256BatchOpArgsV1 &args);
 
-
-
-
+// Internal runtime-adapter entry. workspace and tiling are adapter-owned device
+// buffers. The native path enqueues one four-core kernel and never synchronizes
+// the caller's stream.
 Status Enqueue(const QamDemod256BatchOpArgsV1 &args,
                void *workspace,
                size_t workspace_bytes,
@@ -99,4 +99,4 @@ constexpr size_t LlrElems(uint32_t layers) {
     return static_cast<size_t>(layers) * Q_M * LLR_LAYER_STRIDE;
 }
 
-}
+}  // namespace airan::qam256_demod_batch

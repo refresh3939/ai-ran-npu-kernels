@@ -1,0 +1,30 @@
+{
+  "schema": "airan.pusch_mimo.fused_rx.v1",
+  "status": "PASS",
+  "rank": 4,
+  "tx_antennas": 16,
+  "rx_antennas": 64,
+  "slots": 23,
+  "single_acl_context": true,
+  "single_stream": true,
+  "intermediate_d2h": false,
+  "grouped_rhs_on_device": true,
+  "wall_ms": 1100.64,
+  "bit_errors": 0,
+  "p50_us": {
+    "bri_detect": 8191.6,
+    "descramble": 611.5,
+    "dmrs_gen": 76.4,
+    "dmrs_ls": 129.8,
+    "io_pack_grouped": 11620.3,
+    "layer_demap": 99.5,
+    "ldpc_decode": 41496.6,
+    "lmmse_ce": 13516.8,
+    "ofdm_demod": 1531.3,
+    "qam_demod": 61.1,
+    "rate_dematch": 971.4,
+    "re_demap": 473.3,
+    "slot_total": 40524.7,
+    "tb_tail": 43079.9
+  }
+}

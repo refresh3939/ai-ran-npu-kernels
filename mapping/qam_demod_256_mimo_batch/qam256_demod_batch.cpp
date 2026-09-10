@@ -27,4 +27,4 @@ Status Enqueue(const QamDemod256BatchOpArgsV1 &args,
     return launch_status == ACL_ERROR_NONE ? OK : LAUNCH_FAILED;
 }
 
-}
+}  // namespace airan::qam256_demod_batch

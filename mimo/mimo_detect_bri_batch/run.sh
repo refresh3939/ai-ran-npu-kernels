@@ -8,6 +8,9 @@
 #   NR >= 8*min(BRI_B,L), 2*BRI_B >= L, and BRI_B divides 16.
 set -e
 SCRIPT_DIR=$(cd $(dirname $0); pwd); cd ${SCRIPT_DIR}
+RUN_ROOT=${AIRAN_RUN_ROOT:-${SCRIPT_DIR}}
+BUILD_DIR=${AIRAN_BUILD_DIR:-${RUN_ROOT}/build}
+OUT_DIR=${AIRAN_OUT_DIR:-${RUN_ROOT}/out}
 RUN_MODE="npu"; SOC_VERSION="Ascend310P1"
 while getopts ":r:v:" opt; do case $opt in
     r) RUN_MODE=${OPTARG} ;; v) SOC_VERSION=${OPTARG} ;;
@@ -27,7 +30,7 @@ else _B=8
 fi
 _PK=${PACK:-0}; _P=1
 echo "==== mimo_detect_bri_batch  RUN_MODE=${RUN_MODE}  SOC=${SOC_VERSION}  (NR=${_NR} NL=${_NL} activeL=${_NLR} B=${_B} PACK=${_PK}) ===="
-export AIRAN_DATA_DIR=${SCRIPT_DIR}
+export AIRAN_DATA_DIR=${AIRAN_DATA_DIR:-${RUN_ROOT}}
 
 if { [ "${_NR}" -ne 16 ] && [ "${_NR}" -ne 32 ] && [ "${_NR}" -ne 64 ]; } ||
    [ "${_NL}" -ne 16 ] || [ "${_PK}" -ne 0 ]; then
@@ -79,15 +82,16 @@ NR=${_NR} NL=${_NL} NL_REAL=${_NLR} BRI_B=${_B} PACK=${_PK} AIRAN_SCPAD=${SCPAD}
 rm -rf ${AIRAN_DATA_DIR}/data/ascend_output/${CASE}
 mkdir -p ${AIRAN_DATA_DIR}/data/ascend_output/${CASE}
 
-rm -rf build out; mkdir -p build; cd build
-cmake .. -DRUN_MODE=${RUN_MODE} -DSOC_VERSION=${SOC_VERSION} \
+rm -rf "${BUILD_DIR}" "${OUT_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+cmake "${SCRIPT_DIR}" -DRUN_MODE=${RUN_MODE} -DSOC_VERSION=${SOC_VERSION} \
   -DASCEND_CANN_PACKAGE_PATH=${ASCEND_HOME_PATH} -DN_SC_PAD_VAL=${SCPAD} \
   -DDETECTOR_RX_CAPACITY=${_NR} -DDETECTOR_LAYER_CAPACITY=${_NL} \
-  -DACTIVE_LAYERS=${_NLR} -DDETECTOR_BRI_BLOCK=${_B} -DDETECTOR_PACK=${_PK}
+  -DACTIVE_LAYERS=${_NLR} -DDETECTOR_BRI_BLOCK=${_B} -DDETECTOR_PACK=${_PK} \
+  -DCMAKE_INSTALL_PREFIX="${OUT_DIR}"
 make -j; make install
 
-cd ${SCRIPT_DIR}/out/bin
-export LD_LIBRARY_PATH=${SCRIPT_DIR}/out/lib:${ASCEND_HOME_PATH}/lib64:${LD_LIBRARY_PATH}
+cd "${OUT_DIR}/bin"
+export LD_LIBRARY_PATH=${OUT_DIR}/lib:${ASCEND_HOME_PATH}/lib64:${LD_LIBRARY_PATH}
 echo "[run.sh] executing ..."; ./ascendc_kernels_bbit
 
 echo "[run.sh] verifying ..."

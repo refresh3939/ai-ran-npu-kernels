@@ -1,10 +1,10 @@
-
-
-
-
-
-
-
+/**
+ * @file main.cpp — mimo_dmrs_gen host runner (K-layer orthogonal DMRS)
+ *
+ * Host precomputes SHARED g1 + gmat (GF(2), same as SISO dmrs_gen). Per case
+ * builds c_init/metadata from PuschMimoConfig, launches the unchanged low-level
+ * ABI, and compares its physical [4,2,896] output to the standard reference.
+ */
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -35,7 +35,7 @@ constexpr int N_BENCH_BATCH = 100;
 constexpr size_t N_PAD    = 896;
 constexpr size_t PLANE    = 1792;
 constexpr size_t NBITS    = 31;
-constexpr size_t MAT_LEN  = NBITS * PLANE;
+constexpr size_t MAT_LEN  = NBITS * PLANE;            // 55552
 constexpr size_t N_SYM    = 2;
 constexpr size_t NL       = airan::mimo_dmrs_gen::MAX_LAYERS;
 constexpr size_t CINIT_PAD = 16;
@@ -43,8 +43,8 @@ constexpr size_t OUT_DBG_LEN = 8;
 constexpr size_t TILING_BYTES = 128;
 constexpr size_t SCR_BYTES    = 128;
 
-
-constexpr size_t OUT_GRID  = NL * N_SYM * N_PAD;
+// per-plane output grid: NL layers × 2 syms × 896  (re and im separate)
+constexpr size_t OUT_GRID  = NL * N_SYM * N_PAD;      // 4*2*896 = 7168 half
 
 constexpr float ERR_THRESH = 1e-3f;
 
@@ -100,7 +100,7 @@ float MaxAbsErr(const uint16_t *a, const uint16_t *b, size_t n) {
     }
     return m;
 }
-
+// per-layer error (helps isolate which layer's OCC is wrong)
 float LayerErr(const uint16_t *a, const uint16_t *b, size_t layer) {
     return MaxAbsErr(a + layer*N_SYM*N_PAD, b + layer*N_SYM*N_PAD, N_SYM*N_PAD);
 }
@@ -132,7 +132,7 @@ airan::mimo_dmrs_gen::PuschMimoConfig MakeConfig(const TestCase &test)
     return config;
 }
 
-}
+}  // namespace
 
 
 int32_t main(int32_t, char *[])
@@ -144,7 +144,7 @@ int32_t main(int32_t, char *[])
     const size_t cinitBytes = CINIT_PAD * sizeof(int32_t);
     const size_t gmatBytes  = MAT_LEN   * sizeof(uint16_t);
     const size_t g1Bytes    = PLANE     * sizeof(uint16_t);
-    const size_t gridBytes  = OUT_GRID  * sizeof(uint16_t);
+    const size_t gridBytes  = OUT_GRID  * sizeof(uint16_t);   // NL*2*896 half
     const size_t dbgBytes   = OUT_DBG_LEN * sizeof(float);
     const size_t wsBytes    = (size_t)plat->GetLibApiWorkSpaceSize();
 
@@ -315,7 +315,7 @@ int32_t main(int32_t, char *[])
                ci, TEST_CASES[ci].dir_name, TEST_CASES[ci].num_layers,
                ((float *)dbgH)[3], re_err, im_err, abiReErr, abiImErr, ((float *)dbgH)[2],
                ok ? "[PASS]" : (sentinel_ok ? "[FAIL]" : "[NO-SENTINEL]"));
-
+        // per-layer breakdown (isolate which layer's OCC is off)
         if (!ok) {
             for (size_t l = 0; l < NL; ++l) {
                 float le = LayerErr((uint16_t*)reH, (uint16_t*)goldReH, l);

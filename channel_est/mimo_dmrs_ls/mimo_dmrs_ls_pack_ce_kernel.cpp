@@ -1,4 +1,4 @@
-
+/** Pack 798-point natural h_ls into channel_est_lmmse_mimo's private ABI. */
 #include "kernel_operator.h"
 #include "mimo_dmrs_ls.h"
 

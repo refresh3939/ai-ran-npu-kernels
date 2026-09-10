@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file mimo_detect_bri_tiling.cpp — 生成合法 Cube tiling (BRI 用 base Mmad, 但 Cube 单元需合法 tiling).
+ *   Gram: 16×16×64 (k=M=64); BRI 迭代: 16×16×16. 取最大 k=64.
+ */
 #include <cstdio>
 #include <cstring>
 #include "tiling/tiling_api.h"
@@ -15,7 +15,7 @@ extern "C" void GenerateTiling(const char* socVersion, uint8_t* buf)
     auto plat = platform_ascendc::PlatformAscendCManager::GetInstance(socVersion);
     MultiCoreMatmulTiling api(*plat);
     api.SetDim(1);
-    api.SetAType(TPosition::GM, CubeFormat::ND, DataType::DT_FLOAT16, true);
+    api.SetAType(TPosition::GM, CubeFormat::ND, DataType::DT_FLOAT16, true);    // Aᵀ (Hᴴ 转置载)
     api.SetBType(TPosition::GM, CubeFormat::ND, DataType::DT_FLOAT16, false);
     api.SetCType(TPosition::VECCALC, CubeFormat::ND, DataType::DT_FLOAT);
     api.SetShape(16, 16, 16);

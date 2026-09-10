@@ -11,19 +11,20 @@ from pathlib import Path
 from mimo_profile_compiler import compile_profile, evaluate_capabilities
 
 
-ANTENNA_COUNTS = (8, 16, 32, 64)
-RANKS = (1, 2, 3, 4, 8, 16)
+TX_COUNTS = (1, 2, 4, 8, 16)
+RX_COUNTS = (1, 2, 4, 8, 16, 32, 64)
+RANKS = (1, 2, 3, 4)
 
 
-def candidate(base: dict, antennas: int, rank: int) -> dict:
+def candidate(base: dict, tx_antennas: int, rx_antennas: int, rank: int) -> dict:
     value = copy.deepcopy(base)
-    value["profile_name"] = f"coverage_fd{antennas}x{antennas}_rank{rank}"
+    value["profile_name"] = f"coverage_fd{tx_antennas}x{rx_antennas}_rank{rank}"
     value["topology"] = {
         "architecture": "full_digital",
-        "tx_antennas": antennas,
-        "tx_rf_chains": antennas,
-        "rx_antennas": antennas,
-        "rx_rf_chains": antennas,
+        "tx_antennas": tx_antennas,
+        "tx_rf_chains": tx_antennas,
+        "rx_antennas": rx_antennas,
+        "rx_rf_chains": rx_antennas,
     }
     value["spatial"]["supported_ranks"] = [rank]
     if rank == 3:
@@ -38,7 +39,8 @@ def candidate(base: dict, antennas: int, rank: int) -> dict:
         value["spatial"]["port_policy"] = {"mode": "identity"}
         value["spatial"]["precoding"] = {"default_mode": "bypass"}
     value["dmrs"]["ports_by_rank"] = {
-        str(rank): list(range(1000, 1000 + rank))}
+        str(rank): ([1000, 1002] if rank == 2 else
+                    list(range(1000, 1000 + rank)))}
     value["channel"]["gain_by_rank"] = {str(rank): 0.32}
     return value
 
@@ -48,19 +50,21 @@ def build_matrix(profile_path: Path, capabilities: Path) -> list[dict]:
     rows: list[dict] = []
     with tempfile.TemporaryDirectory() as directory:
         scratch = Path(directory)
-        for antennas in ANTENNA_COUNTS:
-            for rank in RANKS:
-                if rank > antennas:
+        for tx_antennas in TX_COUNTS:
+            for rx_antennas in RX_COUNTS:
+              for rank in RANKS:
+                if rank > min(tx_antennas, rx_antennas):
                     continue
-                path = scratch / f"fd{antennas}_rank{rank}.json"
-                path.write_text(json.dumps(candidate(base, antennas, rank)),
+                path = scratch / f"fd{tx_antennas}x{rx_antennas}_rank{rank}.json"
+                path.write_text(json.dumps(candidate(base, tx_antennas,
+                                                     rx_antennas, rank)),
                                 encoding="utf-8")
                 authored = compile_profile(path, rank)
                 evaluated = evaluate_capabilities(authored, capabilities).value
                 receiver = evaluated["receiver"]
                 rows.append({
-                    "tx": antennas,
-                    "rx": antennas,
+                    "tx": tx_antennas,
+                    "rx": rx_antennas,
                     "rank": rank,
                     "requested_bucket": [
                         receiver.get("requested_rx_bucket", receiver["rx_bucket"]),
@@ -109,11 +113,11 @@ def main() -> None:
     if args.check:
         eligible = {(row["tx"], row["rx"], row["rank"])
                     for row in rows if row["eligibility"] == "eligible"}
-        expected = {(8, 8, rank) for rank in (1, 2, 3, 4)}
+        expected = {(row["tx"], row["rx"], row["rank"]) for row in rows}
         if eligible != expected:
             raise SystemExit(
                 f"coverage regression: eligible={sorted(eligible)}, expected={sorted(expected)}")
-        print("[PASS] installed target eligibility is exactly fd8x8 Rank1-4")
+        print("[PASS] installed target covers common 1..16TX x 1..64RX, PUSCH Rank1-4")
     if args.format == "json":
         print(json.dumps(rows, indent=2, sort_keys=True))
     else:

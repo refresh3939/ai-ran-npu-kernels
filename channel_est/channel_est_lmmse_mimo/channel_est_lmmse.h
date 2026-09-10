@@ -1,10 +1,10 @@
-
-
-
-
-
-
-
+/**
+ * Compile-time configurable low-rank LMMSE channel estimator.
+ *
+ * The input is already LS-estimated and DMRS/OCC separated.  This contract is
+ * intentional: the legacy two-layer comb mapping cannot be extended to 16
+ * layers by assigning one comb per layer.
+ */
 #pragma once
 
 #include <cstddef>
@@ -51,20 +51,20 @@ constexpr uint32_t RANK_TILE = 16;
 constexpr uint32_t N_RANK_TILE = RANK / RANK_TILE;
 constexpr uint32_t PILOT_K_BLOCK = N_PILOT_PAD / 16;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// GM layouts, in half elements unless noted otherwise.
+// b_*   [NL,N_RANK_TILE,PILOT_K_BLOCK,16,16], one pilot model per layer.
+// hls_* [NL, N_RX_GROUP, N_PILOT_PAD, NCOL].
+// Default: a_* [NL,N_SC_TILE,RANK,SC_TILE],
+//          wt_* [NL,N_SC_TILE,N_SYMBOL,2,SC_TILE].
+// Cube-time fused: a_re/a_im are DMRS0 fused factors, a_neg_im/wt_re are
+// DMRS1 fused factors, each [NL,N_SC_TILE,N_SYMBOL,RANK,SC_TILE]. wt_im aliases
+// wt_re on the host and is unused by the kernel.
+// Post-frequency Cube time: a_* keep the default layout; wt_re stores the
+// block-diagonal time matrix in [NL,N_SC_TILE,2 K-blocks,14 N-blocks,16,16]
+// order. wt_im aliases wt_re on the host and is unused by the kernel.
+// t_re  [NL, N_RX_GROUP, RANK, NCOL]: tr.
+// t_im  [NL, N_RX_GROUP, RANK, NCOL]: ti.
+// out_* [NR, NL, N_SYMBOL, N_SC_PAD].
 constexpr size_t B_LAYER_ELEMS = static_cast<size_t>(RANK) * N_PILOT_PAD;
 constexpr size_t B_ELEMS = static_cast<size_t>(NL) * B_LAYER_ELEMS;
 constexpr size_t HLS_ELEMS = static_cast<size_t>(NL) * N_RX_GROUP * N_PILOT_PAD * NCOL;
@@ -110,7 +110,7 @@ static_assert(BLOCK_DIM == 1 || BLOCK_DIM == 2 || BLOCK_DIM == 4,
 static_assert(N_SC_TILE % BLOCK_DIM == 0, "computed SC tiles must split evenly across cores");
 static_assert(N_SC_TILE * SC_TILE <= N_SC_PAD, "computed SC tiles must fit padded output");
 
-constexpr uint32_t WEIGHT_MODEL_MAGIC = 0x43455731u;
+constexpr uint32_t WEIGHT_MODEL_MAGIC = 0x43455731u;  // "CEW1"
 
 enum Status : int32_t {
     OK = 0,
@@ -137,20 +137,20 @@ struct LmmseWeightModelV1 {
     uint32_t reserved[8];
 };
 
-
-
-
+// Public chain buffers are device pointers. pilot_count_host/pilot_sc_host are
+// the synchronized host mirrors used for a fail-closed model check before any
+// kernel is enqueued. The output is always detector-ready [NR,16,14,1664].
 struct ChannelEstLmmseOpArgsV1 {
     uint16_t abi_version;
     uint16_t struct_size;
-    const void *h_ls_re;
+    const void *h_ls_re;          // fp16 [NR,L,2,832]
     const void *h_ls_im;
-    const void *pilot_count;
-    const void *pilot_sc;
+    const void *pilot_count;      // uint16 [L,2], device
+    const void *pilot_sc;         // uint16 [L,2,832], device
     const uint16_t *pilot_count_host;
     const uint16_t *pilot_sc_host;
     const LmmseWeightModelV1 *weight_model;
-    void *h_grid_re;
+    void *h_grid_re;              // fp16 [NR,16,14,1664]
     void *h_grid_im;
     const PuschMimoConfig *config;
     const PuschMimoLayout *layout;
@@ -170,4 +170,4 @@ Status ValidateObservationModel(const PuschMimoConfig &config,
                                 const LmmseWeightModelV1 &model);
 Status ValidateOpArgs(const ChannelEstLmmseOpArgsV1 &args);
 
-}
+}  // namespace airan::channel_est_lmmse

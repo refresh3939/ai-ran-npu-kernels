@@ -36,15 +36,15 @@ Status ValidateConfig(const PuschMimoConfig &config)
     return OK;
 }
 
-}
+}  // namespace
 
 Status BuildCurrentProfile(const PuschMimoConfig *configs,
                            size_t num_configs,
                            const MimoDetectLayerPlan &layer_plan,
                            KernelMetadata *metadata)
 {
-    if (configs == nullptr || metadata == nullptr || num_configs == 0 ||
-        num_configs > MAX_ALLOCATIONS) {
+    if (configs == nullptr || metadata == nullptr ||
+        num_configs != STANDARD_CHAIN_ALLOCATIONS) {
         return INVALID_ARGUMENT;
     }
     if (layer_plan.abi_version != ABI_VERSION ||
@@ -52,7 +52,8 @@ Status BuildCurrentProfile(const PuschMimoConfig *configs,
         return UNSUPPORTED_PROFILE;
     }
     if (layer_plan.num_rx_antennas != NR || layer_plan.layer_capacity != NL ||
-        layer_plan.total_layers < 1 || layer_plan.total_layers > NL ||
+        layer_plan.total_layers < 1 ||
+        layer_plan.total_layers > MAX_PUSCH_LAYERS ||
         layer_plan.num_allocations != num_configs ||
         !IsZero(layer_plan.reserved,
                 sizeof(layer_plan.reserved) / sizeof(layer_plan.reserved[0]))) {
@@ -63,15 +64,6 @@ Status BuildCurrentProfile(const PuschMimoConfig *configs,
     for (size_t i = 0; i < num_configs; ++i) {
         const Status config_status = ValidateConfig(configs[i]);
         if (config_status != OK) return config_status;
-        if (i != 0 &&
-            (configs[i].slot_number != configs[0].slot_number ||
-             configs[i].rb_start != configs[0].rb_start ||
-             configs[i].num_rb != configs[0].num_rb ||
-             configs[i].start_symbol != configs[0].start_symbol ||
-             configs[i].num_allocated_symbols != configs[0].num_allocated_symbols)) {
-            return PLAN_MISMATCH;
-        }
-
         const MimoDetectAllocation &allocation = layer_plan.allocations[i];
         if (allocation.pusch_index != i || allocation.layer_offset != expected_offset ||
             allocation.num_layers != configs[i].num_layers ||
@@ -79,7 +71,7 @@ Status BuildCurrentProfile(const PuschMimoConfig *configs,
             return PLAN_MISMATCH;
         }
         expected_offset = static_cast<uint16_t>(expected_offset + configs[i].num_layers);
-        if (expected_offset > NL) return PLAN_MISMATCH;
+        if (expected_offset > MAX_PUSCH_LAYERS) return PLAN_MISMATCH;
     }
     if (expected_offset != layer_plan.total_layers) return PLAN_MISMATCH;
 
@@ -121,4 +113,4 @@ Status ValidateOpArgs(const MimoDetectIoPackOpArgsV1 &args)
                                &metadata);
 }
 
-}
+}  // namespace airan::mimo_detect_io_pack

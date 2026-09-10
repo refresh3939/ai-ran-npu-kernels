@@ -12,8 +12,6 @@ knowledge_status: current_source_checked_conversation_archived
 
 paths:
   source: kernels/mimo/mimo_detect_bri_batch
-  canonical_algorithm_source: /home/refresh/AI-RAN-NPU/kernels/rx/mimo_detect_bri_batch
-  optimization_source: /home/refresh/AI-RAN-NPU/kernels/rx/mimo_detect_bri_re_multibuf
   knowledge: kernels/mimo/mimo_detect_bri_batch/KNOWLEDGE.md
   conversation: conversations/R13_mimo_detect.md
   conversations:
@@ -212,6 +210,14 @@ correctness:
       bri_block: 8
       xhat_evm: 0.0006
       no_eff_relative_median: 0.00010
+      result: actual_npu_pass
+    - nr: 64
+      active_layers: 16
+      bri_block: 8
+      xhat_evm: 0.0176
+      no_eff_relative_median: 0.00141
+      latency_us: 9628.3
+      evidence: evidence/rx64_layer16_actual_npu_20260908.json
       result: actual_npu_pass
 
 performance:

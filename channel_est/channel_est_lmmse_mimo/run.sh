@@ -3,6 +3,7 @@ set -euo pipefail
 
 CURRENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "${CURRENT_DIR}"
+RUN_ROOT=${AIRAN_RUN_ROOT:-${CURRENT_DIR}}
 
 export ASCEND_HOME_DIR=${ASCEND_HOME_DIR:-/usr/local/Ascend/ascend-toolkit/latest}
 # CANN's environment scripts contain optional-variable reads and condition
@@ -21,7 +22,7 @@ export NR=${NR:-64}
 export NL=${NL:-2}
 export RANK=${RANK:-96}
 export BLOCK_DIM=${BLOCK_DIM:-4}
-export AIRAN_DATA_DIR=${AIRAN_DATA_DIR:-${CURRENT_DIR}/data}
+export AIRAN_DATA_DIR=${AIRAN_DATA_DIR:-${RUN_ROOT}/data}
 SOC_VERSION=${SOC_VERSION:-Ascend310P1}
 # CE64_* aliases keep old experiment commands usable after promotion.
 CE_CUBE_TIME_FUSED=${CE_CUBE_TIME_FUSED:-${CE64_CUBE_TIME_FUSED:-OFF}}
@@ -53,18 +54,18 @@ elif [[ "${CE_CUBE_TIME_POST_GEMM}" == "ON" ]]; then
         echo "post-frequency Cube uses a two-layer batch; Rank3 must use the default Vector path" >&2
         exit 2
     fi
-    BUILD_DIR="${CURRENT_DIR}/build_${CASE}_post"
-    OUT_DIR="${CURRENT_DIR}/out_${CASE}_post"
+    BUILD_DIR="${AIRAN_BUILD_DIR:-${RUN_ROOT}/build_${CASE}_post}"
+    OUT_DIR="${AIRAN_OUT_DIR:-${RUN_ROOT}/out_${CASE}_post}"
     REQUIRED_INPUT="${GOLD}/cube_time_post_matrix.bin"
     VERIFY_ARGS=(--cube-time-post)
 elif [[ "${CE_CUBE_TIME_FUSED}" == "ON" ]]; then
-    BUILD_DIR="${CURRENT_DIR}/build_${CASE}_fused"
-    OUT_DIR="${CURRENT_DIR}/out_${CASE}_fused"
+    BUILD_DIR="${AIRAN_BUILD_DIR:-${RUN_ROOT}/build_${CASE}_fused}"
+    OUT_DIR="${AIRAN_OUT_DIR:-${RUN_ROOT}/out_${CASE}_fused}"
     REQUIRED_INPUT="${GOLD}/cube_time_fused_d1_im.bin"
     VERIFY_ARGS=(--cube-time-fused)
 else
-    BUILD_DIR="${CURRENT_DIR}/build_${CASE}_vector"
-    OUT_DIR="${CURRENT_DIR}/out_${CASE}_vector"
+    BUILD_DIR="${AIRAN_BUILD_DIR:-${RUN_ROOT}/build_${CASE}_vector}"
+    OUT_DIR="${AIRAN_OUT_DIR:-${RUN_ROOT}/out_${CASE}_vector}"
     REQUIRED_INPUT="${GOLD}/gold_h_re.bin"
     VERIFY_ARGS=()
 fi

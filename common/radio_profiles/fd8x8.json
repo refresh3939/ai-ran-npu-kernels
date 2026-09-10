@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "radio_name": "fd8x8",
+  "topology": {
+    "architecture": "full_digital",
+    "tx_antennas": 8,
+    "tx_rf_chains": 8,
+    "rx_antennas": 8,
+    "rx_rf_chains": 8
+  },
+  "capabilities": {
+    "supported_ranks": [1, 2, 3, 4],
+    "pusch_port_policy": "nr_4port",
+    "antenna_mapping": "semi_unitary_dft"
+  },
+  "receiver": {
+    "channel_estimator": "lmmse",
+    "detector": "bri",
+    "max_rx_antennas": 64,
+    "rx_buckets": [8, 16, 32, 64],
+    "storage_layers": 16,
+    "rx_capacity_adapter": "zero_pad_signal_repeat_noise"
+  }
+}

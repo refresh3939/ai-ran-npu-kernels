@@ -14,18 +14,15 @@ from mimo_coverage_matrix import build_matrix
 def main() -> None:
     rows = build_matrix(COMMON / "profiles/fd8x8_rank1_4.json",
                         COMMON / "mimo_operator_capabilities.json")
-    assert len(rows) == 23
+    assert len(rows) == 89
     eligible = [row for row in rows if row["eligibility"] == "eligible"]
-    assert [(row["tx"], row["rx"], row["rank"]) for row in eligible] == [
-        (8, 8, 1), (8, 8, 2), (8, 8, 3), (8, 8, 4)]
-    assert [row["execution_bucket"] for row in eligible] == [
-        [64, 16], [64, 16], [64, 16], [16, 16]]
-    rank16 = next(row for row in rows
-                  if row["tx"] == 64 and row["rank"] == 16)
-    assert rank16["requested_bucket"] == [64, 16]
-    assert rank16["variant"] is None
-    assert "execution_variant" in rank16["blockers"]
-    print("[PASS] MIMO shape coverage matrix is explicit and fail-closed")
+    assert len(eligible) == len(rows)
+    edge = next(row for row in rows
+                if (row["tx"], row["rx"], row["rank"]) == (16, 64, 4))
+    assert edge["requested_bucket"] == [64, 4]
+    assert edge["execution_bucket"] == [64, 16]
+    assert edge["variant"] == "rx64_storage16_rank1_4"
+    print("[PASS] common 1..16TX x 1..64RX Rank1-4 coverage matrix")
 
 
 if __name__ == "__main__":

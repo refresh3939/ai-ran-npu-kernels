@@ -1,29 +1,29 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/**
+ * @file mimo_dmrs_gen_kernel.cpp — K-layer orthogonal PUSCH DMRS (TX, MIMO)
+ *                                   (Ascend 310P3 / dav_m200, Vector-only)
+ *
+ * Base Gold sequence (g1+gmat, GF(2)) generated ONCE per DMRS occasion
+ * (layer-independent), then per-port Type-1 OCC is applied.
+ *
+ *   1. base: count = g1 + Sum gmat[i];  c = parity;  val = (1-2c)/sqrt2   (== SISO)
+ *   2. per configured port p: v_occ[k] = val[k] * wf_p[k&1] * wt_p
+ *        ports 1000,1002: wf=[+1,+1] -> occ = all +1
+ *        ports 1001,1003: wf=[+1,-1] -> occ = [+1,-1,+1,-1,...]
+ *
+ * OCC flip pattern [+1,-1,...] is VECTOR-GENERATED once (no SetValue):
+ *   idx = [0,1,2,...];  parity = idx - 2*floor(idx/2);  occ = 1 - 2*parity
+ * Fully vectorised -> no scalar SetValue, no V/S race dropping sign flips.
+ *
+ * dav_m200 quirks: ALL Muls out-of-place; in-place Adds / tensor-tensor fine.
+ *
+ * For the supported single-symbol ports 1000..1003, wt is +1 at every
+ * occasion. The metadata carries this explicitly and the kernel rejects any
+ * incompatible negative-Wt descriptor rather than silently generating it.
+ *
+ * Input  : c_init[2] int32, gmat[31,1792] fp16, g1[1792] fp16
+ * Output : physical x_re/x_im [4,2,896] fp16 + dbg[8] fp32. The public
+ * runtime adapter exposes only the active logical [L,2,896] prefix.
+ */
 #include "kernel_operator.h"
 #include "mimo_dmrs_gen.h"
 
@@ -39,7 +39,7 @@ constexpr uint32_t N_SYM = mdg::CURRENT_DMRS_SYMBOLS;
 constexpr uint32_t CINIT_PAD = mdg::CINIT_PAD;
 constexpr uint32_t MAX_NL = mdg::MAX_LAYERS;
 constexpr uint32_t OUT_GRID = MAX_NL * N_SYM * N_PAD;
-}
+}  // namespace
 
 
 class MimoDmrsGen {
@@ -85,9 +85,9 @@ private:
 
 
 __aicore__ inline void MimoDmrsGen::Init(GM_ADDR cinit_gm, GM_ADDR gmat_gm, GM_ADDR g1_gm,
-                                          GM_ADDR  ,
+                                          GM_ADDR /*scratch_gm*/,
                                           GM_ADDR out_re_gm, GM_ADDR out_im_gm, GM_ADDR dbg_gm,
-                                          GM_ADDR  , GM_ADDR tiling_gm, TPipe *pipe)
+                                          GM_ADDR /*ws_gm*/, GM_ADDR tiling_gm, TPipe *pipe)
 {
     pipe_    = pipe;
     blockId_ = GetBlockIdx();
@@ -118,7 +118,7 @@ __aicore__ inline void MimoDmrsGen::Init(GM_ADDR cinit_gm, GM_ADDR gmat_gm, GM_A
 }
 
 
-
+// Vector-generate OCC flip [+1,-1,+1,-1,...] into bufOccFlip_ (once, no SetValue).
 __aicore__ inline void MimoDmrsGen::BuildOccFlip()
 {
     auto idx  = bufIdx_.Get<half>();
@@ -131,21 +131,21 @@ __aicore__ inline void MimoDmrsGen::BuildOccFlip()
     const half N2     = (half)(-2.0f);
     const half ONE    = (half)1.0f;
 
-    ArithProgression(idx, (half)0.0f, (half)1.0f, N_PAD);
+    ArithProgression(idx, (half)0.0f, (half)1.0f, N_PAD);   // idx = 0,1,2,...
     PipeBarrier<PIPE_V>();
 
-    Muls(t, idx, HALF, N_PAD);
-    Adds(t, t, NQUART, N_PAD);
+    Muls(t, idx, HALF, N_PAD);          // t = idx/2
+    Adds(t, t, NQUART, N_PAD);          // t -= 0.25
     Cast(i16, t, RoundMode::CAST_RINT, N_PAD);
-    Cast(t, i16, RoundMode::CAST_NONE, N_PAD);
+    Cast(t, i16, RoundMode::CAST_NONE, N_PAD);   // t = floor(idx/2)
     PipeBarrier<PIPE_V>();
 
-    Muls(occf, t, N2, N_PAD);
-    Add(occf, occf, idx, N_PAD);
+    Muls(occf, t, N2, N_PAD);           // occf = -2*floor
+    Add(occf, occf, idx, N_PAD);        // occf = idx - 2floor = parity(0/1)
     PipeBarrier<PIPE_V>();
 
-    Muls(t, occf, N2, N_PAD);
-    Adds(occf, t, ONE, N_PAD);
+    Muls(t, occf, N2, N_PAD);           // t = -2*parity
+    Adds(occf, t, ONE, N_PAD);          // occf = 1 - 2parity = +1/-1
     PipeBarrier<PIPE_V>();
 }
 
@@ -200,8 +200,8 @@ __aicore__ inline void MimoDmrsGen::EmitSymbol(uint32_t s)
     auto occf = bufOccFlip_.Get<half>();
     auto out  = bufOut_.Get<half>();
 
-
-
+    // Ports 1000/1002 share the unmodified sequence. Queue all of their writes
+    // directly from the already padded base buffers.
     bool hasPlain = false;
     for (uint32_t l = 0; l < nl_; ++l) hasPlain |= wfOddNegative_[l] == 0;
     if (hasPlain) {
@@ -221,8 +221,8 @@ __aicore__ inline void MimoDmrsGen::EmitSymbol(uint32_t s)
     for (uint32_t l = 0; l < nl_; ++l) hasFlip |= wfOddNegative_[l] != 0;
     if (!hasFlip) return;
 
-
-
+    // Ports 1001/1003 share one [+1,-1,...] result. Compute it once per
+    // symbol/plane and fan it out to every matching layer.
     Mul(out, bre, occf, N_PAD);
     PipeBarrier<PIPE_V>();
     {
@@ -293,8 +293,8 @@ __aicore__ inline void MimoDmrsGen::Process()
     c[0] = cinit.GetValue(0);
     c[1] = cinit.GetValue(1);
     const uint32_t activeBits = static_cast<uint32_t>(c[0]) | static_cast<uint32_t>(c[1]);
-
-
+    // Most c_init pairs use far fewer than 31 distinct basis rows. Load only
+    // the union needed by the two symbols while retaining the legacy gmat ABI.
     uint32_t activeRowCount = 0;
     for (uint32_t i = 0; i < NBITS; ++i) {
         if (((activeBits >> i) & 1u) != 0) {
@@ -313,8 +313,8 @@ __aicore__ inline void MimoDmrsGen::Process()
         if (wfOddNegative_[l] > 1) return;
         if (l < nl_ && wfOddNegative_[l] != 0) needsOccFlip = true;
     }
-
-
+    // Current profile is Type-1, dmrs_length=1, ports 1000..1003. Their Wt
+    // sign is +1 for every separately generated single-symbol occasion.
     for (uint32_t l = 0; l < nl_; ++l) {
         for (uint32_t s = 0; s < N_SYM; ++s) {
             if (metadata.GetValue(mdg::META_WT_NEGATIVE_WORD + l * N_SYM + s) != 0) return;

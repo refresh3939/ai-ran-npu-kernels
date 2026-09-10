@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-
-
+// Shared indexing contract between the public repeated-y MIMO detector ABI
+// and the compact eight-RE RHS layout consumed by the optimized BRI kernel.
 namespace airan::bri_grouped_rhs_adapter {
 
 constexpr uint16_t ABI_VERSION = 1;
@@ -39,4 +39,4 @@ constexpr size_t GroupedIndex(uint32_t re, uint32_t rx)
 static_assert(N_RE % GROUP_SIZE == 0,
               "BRI schedule must contain complete groups");
 
-}
+}  // namespace airan::bri_grouped_rhs_adapter

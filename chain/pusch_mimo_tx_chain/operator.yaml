@@ -4,8 +4,8 @@ name: pusch_mimo_tx_chain
 category: chain
 chain: tx
 spatial_mode: mimo
-status: rank1_to_rank4_fused_npu_tx_verified
-claim: fused_single_context_tx_and_staged_coded_loopback_pass
+status: rank1_to_rank4_1to16tx_fused_npu_verified
+claim: configurable_1to16tx_fused_chain_and_16tx64rx_coded_loopback_pass
 
 paths:
   source: kernels/chain/pusch_mimo_tx_chain
@@ -13,6 +13,11 @@ paths:
   shared_harness: kernels/chain/pusch_mimo_contract_harness.py
 
 profile:
+  configuration:
+    radio: ../../common/radio_profiles/fd16x64.json
+    grant: ../../common/pusch_grants/full_band.json
+    compiler: ../../common/mimo_config_compiler.py
+    runtime_abi: {version: 2, bytes: 192}
   rank_contract: [1, 2, 3, 4]
   currently_composable_dmrs_rank: 4
   tx_ports: [1, 2, 4]
@@ -29,13 +34,22 @@ profile:
     observation_model: FD_OCC2_399
     channel_est_lmmse_mimo: supported_npu_verified
   physical_radio_profiles:
-    fd8x8_rank1_4:
+    fd8x8:
       architecture: full_digital
       tx_antennas: 8
       tx_rf_chains: 8
       logical_ports_by_rank: {1: 1, 2: 2, 3: 4, 4: 4}
       antenna_mapping: semi_unitary_dft8_at_host_channel_boundary
       status: npu_23slot_rank1_to_rank4_pass
+    fd16x64:
+      architecture: full_digital
+      tx_antennas: 16
+      tx_rf_chains: 16
+      rx_antennas: 64
+      rx_rf_chains: 64
+      logical_ports_by_rank: {1: 1, 2: 2, 3: 4, 4: 4}
+      antenna_mapping: semi_unitary_dft16_on_npu
+      status: rank4_23slot_coded_e2e_npu_pass
 
 execution:
   contract_check: ./run_contracts.sh
@@ -52,7 +66,8 @@ execution:
     intermediate_host_files: false
   output:
     dtype: int16_interleaved_iq
-    shape: [slot, logical_tx_port, 30720, 2]
+    shape: [slot, physical_tx_antenna, 30720, 2]
+    physical_tx_antennas: 1..16
     logical_tx_ports_by_rank: {1: 1, 2: 2, 3: 4, 4: 4}
 
 hard_blockers: []
@@ -68,15 +83,18 @@ evidence:
     - kernels/chain/pusch_mimo_loopback/evidence/rank2_23slot_e2e_fd8x8.json
     - kernels/chain/pusch_mimo_loopback/evidence/rank3_23slot_e2e_fd8x8.json
     - kernels/chain/pusch_mimo_loopback/evidence/rank4_23slot_e2e_fd8x8.json
+    - kernels/chain/pusch_mimo_loopback/evidence/rank4_23slot_e2e_fd16x64_rank1_4.json
   fused_tx:
-    receipt: kernels/chain/pusch_mimo_tx_chain/evidence/fused_tx_actual_npu_20260908.json
+    receipt: kernels/chain/pusch_mimo_tx_chain/evidence/fused_tx_fd16x64_actual_npu_20260908.json
+    standard_rank4_single_slot_receipt: kernels/chain/pusch_mimo_tx_chain/evidence/fused_tx_fd16x64_rank4_single_slot_20260909.json
+    split_config_rank4_single_slot_receipt: kernels/chain/pusch_mimo_tx_chain/evidence/fused_tx_fd16x64_rank4_split_config_actual_npu_20260909.json
     rank1_to_rank4_one_slot_actual_npu: pass
     rank4_23slot_actual_npu: pass
-    rank4_23slot_output_bytes: 11304960
+    rank4_23slot_output_bytes: 45219840
 
 known_limitations:
-  - fused_output_is_logical_ports_not_eight_physical_antenna_streams
-  - semi_unitary_dft8_port_to_antenna_stage_remains_at_radio_boundary
+  - one_nr_pusch_is_rank1_to_rank4_by_standard
+  - detector_16_column_axis_is_internal_storage_alignment_not_rank
 
 forbidden_substitutions:
   - rate_match_siso_for_rate_match_mimo

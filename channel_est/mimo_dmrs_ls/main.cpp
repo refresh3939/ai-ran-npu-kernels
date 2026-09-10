@@ -262,7 +262,7 @@ void RunCase(aclrtStream stream, const std::string &name, Buffer &packIndex)
     std::printf(" CE-natural=PASS legacy-pack=PASS\n");
 }
 
-}
+}  // namespace
 
 int main()
 {

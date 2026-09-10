@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file mimo_dmrs_ls.h
+ * Natural-layout PUSCH MIMO DMRS LS estimator and LMMSE adapter contract.
+ */
 #pragma once
 
 #include <cstddef>
@@ -18,8 +18,8 @@ constexpr uint32_t ABI_VERSION = PUSCH_MIMO_ABI_VERSION;
 #define MIMO_DMRS_LS_BLOCK_DIM 4
 #endif
 constexpr uint32_t NR_CURRENT = MIMO_DMRS_LS_NR;
-
-
+// PuschMimoConfig carries four DMRS ports.  The detector's shared ABI can have
+// a wider layer axis, but this physical estimator supports Rank-1..4 only.
 constexpr uint32_t MAX_LAYERS = 4;
 constexpr uint32_t N_SYMBOLS = 14;
 constexpr uint32_t MAX_DMRS_SYMBOLS = 4;
@@ -56,8 +56,8 @@ enum Status : int32_t {
     CE_OBSERVATION_MODEL_MISMATCH = LMMSE_OBSERVATION_MODEL_MISMATCH,
 };
 
-
-
+// Canonical per-layer observation model consumed together with pilot_count and
+// pilot_sc.  Values intentionally match the device metadata words.
 enum ObservationModel : uint32_t {
     COMB2_798 = 0,
     FD_OCC2_399 = 1,
@@ -66,26 +66,26 @@ enum ObservationModel : uint32_t {
 using PuschMimoConfig = ::airan::PuschMimoConfig;
 using PuschMimoLayout = ::airan::PuschMimoLayout;
 
-
+// Public buffers are logical shapes; callers may allocate current-profile maxima.
 struct MimoDmrsLsOpArgsV1 {
     uint16_t abi_version;
     uint16_t struct_size;
-    const void *rx_grid_re;
+    const void *rx_grid_re;       // fp16 [NR,NSYM,NSC_PAD]
     const void *rx_grid_im;
-    const void *dmrs_ref_re;
+    const void *dmrs_ref_re;      // fp16 [L,D,NDMRS_REF_PAD]
     const void *dmrs_ref_im;
-    void *h_ls_re;
+    void *h_ls_re;                // fp16 [NR,L,D,NPILOT_PAD]
     void *h_ls_im;
-    void *pilot_sc;
-    void *pilot_count;
-    void *noise_var_rx;
+    void *pilot_sc;               // uint16 [L,D,NPILOT_PAD]
+    void *pilot_count;            // uint16 [L,D], device backing is COUNT_PAD
+    void *noise_var_rx;           // fp16 [NR]
     const PuschMimoConfig *config;
     const PuschMimoLayout *layout;
     void *stream;
 };
 
-
-
+// Internal 128-byte descriptor consumed as the low-level kernel tiling tail.
+// The public chain does not expose this derived resource.
 struct KernelMetadata {
     uint32_t magic;
     uint32_t num_rx;
@@ -105,7 +105,7 @@ struct KernelMetadata {
 };
 static_assert(sizeof(KernelMetadata) == TILING_BYTES, "metadata ABI must be 128 bytes");
 
-constexpr uint32_t META_MAGIC = 0x4d4c5331u;
+constexpr uint32_t META_MAGIC = 0x4d4c5331u; // "MLS1"
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            PuschMimoLayout *layout,
@@ -115,8 +115,8 @@ Status BuildCurrentProfile(const PuschMimoConfig &config,
 
 Status ValidateOpArgs(const MimoDmrsLsOpArgsV1 &args);
 
-
-
+// Classifies every layer independently.  Both 798 and 399 are canonical CE
+// inputs, including a mixed model such as [399,399,798].
 Status DescribeObservationModels(const uint16_t *pilot_count,
                                  uint32_t num_layers,
                                  uint32_t num_dmrs_symbols,
@@ -127,14 +127,14 @@ Status ValidateNaturalLmmseContract(const uint16_t *pilot_count,
                                     uint32_t num_layers,
                                     uint32_t num_dmrs_symbols);
 
-
-
-
+// Legacy private pack only: old channel_est_lmmse_mimo weights have 798 valid
+// observations per (layer,DMRS).  Canonical CE callers must use the natural
+// contract above and must not use this function as a global compatibility gate.
 Status ValidateLmmse798Compatibility(const uint16_t *pilot_count,
                                      uint32_t num_layers,
                                      uint32_t num_dmrs_symbols);
 
-
+// Retained as a source-compatible spelling for the existing pack adapter.
 inline Status ValidateCe64x16Packing(const uint16_t *pilot_count,
                                      uint32_t num_layers,
                                      uint32_t num_dmrs_symbols)
@@ -159,4 +159,4 @@ constexpr size_t CePackedElems() {
     return CE_PACKED_ELEMS;
 }
 
-}
+}  // namespace airan::mimo_dmrs_ls

@@ -1,10 +1,10 @@
-
-
-
-
-
-
-
+/**
+ * PUSCH MIMO DMRS LS estimator, current 64-Rx / Type-1 profile.
+ *
+ * Public output stays natural: [rx,layer,dmrs,pilot].  A shared comb is
+ * despread over adjacent DMRS RE pairs and therefore produces 399 independent
+ * observations; an exclusive comb produces 798 observations.
+ */
 #include "kernel_operator.h"
 #include "mimo_dmrs_ls.h"
 
@@ -16,9 +16,9 @@ constexpr uint32_t RX_PER_CORE = NR_CURRENT / BLOCK_DIM;
 constexpr uint32_t PIPELINE_DEPTH = 2;
 constexpr uint32_t FULL_BUF = 1696;
 constexpr uint32_t PILOT_WORK = N_DMRS_REF_PAD;
-constexpr uint32_t GATHER_FULL_REPEATS = 13;
-constexpr uint32_t GATHER_PAIR_REPEATS = 7;
-constexpr uint32_t REDUCE_REPEATS = 7;
+constexpr uint32_t GATHER_FULL_REPEATS = 13;  // 13 * 64 = 832 half results
+constexpr uint32_t GATHER_PAIR_REPEATS = 7;   // 7 * 64 = 448 half results
+constexpr uint32_t REDUCE_REPEATS = 7;        // 7 * 128 = 896 half inputs
 constexpr uint32_t REF_CACHE_ELEMS = MAX_LAYERS * CURRENT_DMRS_SYMBOLS * N_DMRS_REF_PAD;
 }
 
@@ -77,8 +77,8 @@ __aicore__ inline void MimoDmrsLs::Init(
     metaG_.SetGlobalBuffer(reinterpret_cast<__gm__ uint32_t *>(tiling), META_WORDS);
 
     pipe_->InitBuffer(bMeta_, META_WORDS * sizeof(uint32_t));
-
-
+    // Scratch for the one-shot pilot description.  The output queue is
+    // initialized later, after that path releases its manual MTE3 events.
     pipe_->InitBuffer(bYreFull_, FULL_BUF * sizeof(half));
     pipe_->InitBuffer(bYimFull_, FULL_BUF * sizeof(half));
     pipe_->InitBuffer(bComb0Re_, PILOT_WORK * sizeof(half));
@@ -149,8 +149,8 @@ __aicore__ inline void MimoDmrsLs::ComplexMulConj(
     LocalTensor<half> xre, LocalTensor<half> xim)
 {
     auto tmp = bTmp_.Get<half>();
-
-
+    // All operations below are ordered on PIPE_V.  Keep cross-pipe events at
+    // the GM boundaries, but do not reintroduce per-instruction PIPE_V drains.
     Mul(hre, yre, xre, N_PILOT_PAD);
     Mul(tmp, yim, xim, N_PILOT_PAD);
     Add(hre, hre, tmp, N_PILOT_PAD);
@@ -258,8 +258,8 @@ __aicore__ inline void MimoDmrsLs::Process()
     auto noise = bNoise_.Get<half>();
     Duplicate(noise, static_cast<half>(0.0f), RX_PER_CORE);
 
-
-
+    // The reference is shared by all 16 Rx handled by this core.  Load it once
+    // instead of repeating the same GM traffic inside the Rx loop.
     for (uint32_t layer = 0; layer < nl_; ++layer) {
         for (uint32_t dmrs = 0; dmrs < ndmrs_; ++dmrs) {
             const size_t refOffset = (static_cast<size_t>(layer) * ndmrs_ + dmrs) * N_DMRS_REF_PAD;
@@ -270,8 +270,8 @@ __aicore__ inline void MimoDmrsLs::Process()
     auto refsReady = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE2_V));
     SetFlag<HardEvent::MTE2_V>(refsReady); WaitFlag<HardEvent::MTE2_V>(refsReady);
 
-
-
+    // The output queue owns two [re,im] slots.  MTE3 drains one slot while
+    // PIPE_V computes the next layer into the other.
     pipe_->InitBuffer(qOut_, PIPELINE_DEPTH, 2 * PILOT_WORK * sizeof(half));
     const uint32_t rxStart = block_ * RX_PER_CORE;
     for (uint32_t localRx = 0; localRx < RX_PER_CORE; ++localRx) {
@@ -320,8 +320,8 @@ __aicore__ inline void MimoDmrsLs::Process()
                 }
 
                 if (layer == 0) AccumulateNoise(outRe, outIm, count, dmrs == 0u);
-
-
+                // Keep the expression local: dav_m200 rejects calls from an
+                // __aicore__ function to an ordinary host constexpr helper.
                 const size_t outOffset = ((static_cast<size_t>(rx) * nl_ + layer) *
                                           ndmrs_ + dmrs) * N_PILOT_PAD;
                 qOut_.EnQue(packedOut);

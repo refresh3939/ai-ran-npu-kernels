@@ -4,6 +4,9 @@ set -e
 
 SCRIPT_DIR=$(cd $(dirname $0); pwd)
 cd ${SCRIPT_DIR}
+RUN_ROOT=${AIRAN_RUN_ROOT:-${SCRIPT_DIR}}
+BUILD_DIR=${AIRAN_BUILD_DIR:-${RUN_ROOT}/build}
+OUT_DIR=${AIRAN_OUT_DIR:-${RUN_ROOT}/out}
 
 RUN_MODE="npu"
 SOC_VERSION="Ascend310P3"
@@ -32,7 +35,7 @@ echo "[run.sh]  mimo_dmrs_gen (TX K-layer DMRS)"
 echo "[run.sh]  RUN_MODE=${RUN_MODE}  SOC=${SOC_VERSION}"
 echo "================================================="
 
-export AIRAN_DATA_DIR=${SCRIPT_DIR}
+export AIRAN_DATA_DIR=${AIRAN_DATA_DIR:-${RUN_ROOT}}
 echo "[run.sh]  AIRAN_DATA_DIR=${AIRAN_DATA_DIR}"
 
 # Always regenerate: the cases intentionally cover different ranks/port orders.
@@ -42,18 +45,18 @@ mkdir -p ${AIRAN_DATA_DIR}/data/ascend_output
 
 export ASCEND_GLOBAL_LOG_LEVEL=3
 
-rm -rf build out
-mkdir -p build
-cd build
-cmake .. \
+rm -rf "${BUILD_DIR}" "${OUT_DIR}"
+mkdir -p "${BUILD_DIR}"
+cmake -S "${SCRIPT_DIR}" -B "${BUILD_DIR}" \
     -DRUN_MODE=${RUN_MODE} \
     -DSOC_VERSION=${SOC_VERSION} \
-    -DASCEND_CANN_PACKAGE_PATH=${ASCEND_HOME_PATH}
-make -j
-make install
+    -DASCEND_CANN_PACKAGE_PATH=${ASCEND_HOME_PATH} \
+    -DCMAKE_INSTALL_PREFIX="${OUT_DIR}"
+cmake --build "${BUILD_DIR}" -j
+cmake --install "${BUILD_DIR}"
 
-cd ${SCRIPT_DIR}/out/bin
-export LD_LIBRARY_PATH=${SCRIPT_DIR}/out/lib:${ASCEND_HOME_PATH}/lib64:${LD_LIBRARY_PATH}
+cd "${OUT_DIR}/bin"
+export LD_LIBRARY_PATH=${OUT_DIR}/lib:${ASCEND_HOME_PATH}/lib64:${LD_LIBRARY_PATH}
 
 echo ""
 echo "[run.sh] executing kernel ..."

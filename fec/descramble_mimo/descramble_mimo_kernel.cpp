@@ -1,14 +1,14 @@
-
-
-
-
-
-
-
-
-
-
-
+/**
+ * @file descramble_mimo_kernel.cpp
+ * Single-launch compact PUSCH MIMO descrambling for Rank 1..4 and slot batches.
+ *
+ * layer_demap has already compacted [L,q,12,1600] into [q,L*19200].
+ * This kernel therefore performs only the remaining ABI work: select the QAM
+ * stream for each canonical NR bit, multiply its cached Gold sign, and clear
+ * the L*48 tail. Four AIVs own two output bit streams each. Rank and slot axes
+ * remain inside one native launch; no per-layer/per-slot wrapper launches and
+ * no intermediate GM permutation buffer are used.
+ */
 #include "kernel_operator.h"
 #include "descramble_mimo.h"
 
@@ -26,7 +26,7 @@ __aicore__ inline uint32_t NRBitToQamStream(uint32_t bit)
 {
     return (bit >> 1) + ((bit & 1u) << 2);
 }
-}
+}  // namespace
 
 extern "C" __global__ __aicore__ void descramble_mimo_kernel(
     GM_ADDR llr_qam_gm, GM_ADDR sign_gm, GM_ADDR llr_nr_gm,
@@ -77,7 +77,7 @@ extern "C" __global__ __aicore__ void descramble_mimo_kernel(
     auto llr = llr_buf.Get<int16_t>();
     auto sign = sign_buf.Get<int16_t>();
 
-
+    // Each AIV owns canonical NR-bit streams {core, core+4}.
     for (uint32_t bit = core; bit < qm; bit += dmm::BLOCK_DIM) {
         const uint32_t qam_stream = NRBitToQamStream(bit);
         for (uint32_t slot = 0; slot < num_slots; ++slot) {

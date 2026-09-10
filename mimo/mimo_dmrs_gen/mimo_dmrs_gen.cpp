@@ -44,7 +44,7 @@ int32_t DmrsCinit(const PuschMimoConfig &config, uint32_t symbol)
     return static_cast<int32_t>((term + tail) & 0x7fffffffu);
 }
 
-}
+}  // namespace
 
 Status GetCurrentPortOccSemantics(uint16_t port, PortOccSemantics *semantics)
 {
@@ -53,8 +53,8 @@ Status GetCurrentPortOccSemantics(uint16_t port, PortOccSemantics *semantics)
 
     const uint32_t port_index = static_cast<uint32_t>(port - 1000u);
     semantics->port_index = port_index;
-
-
+    // TS 38.211 table 6.4.1.1.3-1, ports 1000..1003:
+    // lambda/comb is {0,0,1,1}, Wf is {++,+-,++,+-}, and Wt is ++.
     semantics->comb_delta = port_index / 2u;
     semantics->wf_odd_negative = port_index & 1u;
     for (uint32_t dmrs = 0; dmrs < CURRENT_DMRS_SYMBOLS; ++dmrs) {
@@ -175,4 +175,4 @@ void BuildGoldBasis(uint16_t *gmat, uint16_t *g1)
     }
 }
 
-}
+}  // namespace airan::mimo_dmrs_gen

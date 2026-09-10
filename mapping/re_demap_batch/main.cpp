@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file main.cpp
+ * Standalone runtime-batch RE demapper runner.
+ */
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -129,7 +129,7 @@ bool LoadDeviceFile(const std::string &path, size_t bytes,
 }
 #endif
 
-}
+}  // namespace
 
 int32_t main(int32_t, char **)
 {

@@ -1,8 +1,8 @@
-
-
-
-
-
+/**
+ * @file mimo_detect_io_pack.h
+ * Fixed-profile adapter between the natural PUSCH MIMO grid layout and the
+ * physical ABI consumed by mimo_detect_bri_batch.
+ */
 #pragma once
 
 #include <cstddef>
@@ -23,6 +23,7 @@ constexpr uint32_t NR = MIMO_DETECT_IO_NR;
 constexpr uint32_t NL = MIMO_DETECT_IO_NL;
 constexpr uint32_t MAX_PUSCH_LAYERS = 4;
 constexpr uint32_t MAX_ALLOCATIONS = ::airan::PUSCH_MIMO_MAX_ALLOCATIONS;
+constexpr uint32_t STANDARD_CHAIN_ALLOCATIONS = 1;
 constexpr uint32_t N_SYMBOL = 14;
 constexpr uint32_t N_SC_PAD = 1664;
 constexpr uint32_t N_RE = N_SYMBOL * N_SC_PAD;
@@ -32,7 +33,7 @@ constexpr uint32_t RE_TILE = 16;
 constexpr uint32_t RX_TILE = NR >= 32 ? 32 : 16;
 constexpr uint32_t RX_GROUP = 16;
 constexpr uint32_t TILING_BYTES = 32;
-constexpr uint32_t META_MAGIC = 0x4d495031u;
+constexpr uint32_t META_MAGIC = 0x4d495031u;  // "MIP1"
 constexpr float NOISE_MEAN_SCALE =
     NR == 16 ? 0.0625f : (NR == 32 ? 0.03125f : 0.015625f);
 
@@ -77,13 +78,14 @@ struct KernelMetadata {
 static_assert(sizeof(KernelMetadata) == TILING_BYTES,
               "kernel metadata must remain one 32-byte DMA block");
 
-
-
-
-
-
-
-
+// Public wrapper arguments. Complex tensors use separate fp16 planes:
+//   rx_grid_* [NR,N_SYMBOL,N_SC_PAD]
+//   h_grid_*  [NR,NL,N_SYMBOL,N_SC_PAD], where NL=16 is storage alignment;
+//             only [0,num_layers) with num_layers<=4 is active
+//   noise_var_rx [NR]
+//   hrm_*     [N_RE,NR,NL]
+//   yvpad_*   [N_RE,NR,NL]
+//   no        [N_RE]
 struct MimoDetectIoPackOpArgsV1 {
     uint16_t abi_version;
     uint16_t struct_size;
@@ -111,11 +113,11 @@ Status BuildCurrentProfile(const PuschMimoConfig *configs,
 
 Status ValidateOpArgs(const MimoDetectIoPackOpArgsV1 &args);
 
-
-
-
+// Internal runtime-adapter entry. The caller owns a device-side metadata
+// buffer populated by BuildCurrentProfile. The function enqueues exactly one
+// four-core kernel and never synchronizes the caller's stream.
 Status Enqueue(const MimoDetectIoPackOpArgsV1 &args,
                const void *metadata,
                size_t metadata_bytes);
 
-}
+}  // namespace airan::mimo_detect_io_pack

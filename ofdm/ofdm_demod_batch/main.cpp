@@ -1,9 +1,9 @@
-
-
-
-
-
-
+/**
+ * @file main.cpp — batched OFDM demodulator host runner
+ *
+ * Input is interleaved int16 IQ [B, 30720, 2].  A single persistent device
+ * launch produces separated fp16 S4 grids [B, 14, 32, 64].
+ */
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -70,7 +70,7 @@ void LoadInput(const std::string &path, size_t bytes, uint8_t **hostOut, uint8_t
 }
 #endif
 
-}
+}  // namespace
 
 int32_t main(int32_t, char **)
 {

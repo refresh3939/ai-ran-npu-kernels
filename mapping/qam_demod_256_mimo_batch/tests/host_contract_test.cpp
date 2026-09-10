@@ -39,7 +39,7 @@ PuschMimoConfig MakeConfig(uint16_t layers)
     return config;
 }
 
-}
+}  // namespace
 
 int main()
 {

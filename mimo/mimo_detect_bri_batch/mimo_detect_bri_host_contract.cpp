@@ -20,7 +20,7 @@ bool HalfIsFinite(uint16_t value)
 
 bool HalfIsZero(uint16_t value)
 {
-
+    // Accept both +0 and -0 as numerical zero.
     return (value & 0x7fffu) == 0;
 }
 
@@ -90,7 +90,7 @@ bool ValidateYvpadPlane(const char *name, const uint16_t *data, std::string *rea
     return true;
 }
 
-}
+}  // namespace
 
 bool ValidateMimoDetectBriHostContract(
     const MimoDetectBriHostContract &contract, std::string *reason)
@@ -170,4 +170,4 @@ bool ValidateMimoDetectBriPhysicalInputs(
     return true;
 }
 
-}
+}  // namespace airan

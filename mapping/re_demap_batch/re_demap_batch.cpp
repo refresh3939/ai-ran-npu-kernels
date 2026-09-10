@@ -49,7 +49,7 @@ Status ValidateConfig(const PuschMimoConfig &config)
     return OK;
 }
 
-}
+}  // namespace
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            PuschMimoLayout *layout,
@@ -106,8 +106,8 @@ Status BuildGatherIndex(uint32_t *index, size_t index_elems)
 {
     if (index == nullptr || index_elems < N_SC_PAD) return RESOURCE_TOO_SMALL;
 
-
-
+    // Used subcarriers in fftshift order: [-798..-1, DC, +1..+797].
+    // Upstream OFDM stage-4 stores natural bin n at [n%32,n/32].
     for (uint32_t used = 0; used < N_SC_USED; ++used) {
         uint32_t bin;
         if (used < N_SC_USED / 2) {
@@ -194,4 +194,4 @@ Status Enqueue(const ReDemapBatchOpArgsV1 &args,
 #endif
 }
 
-}
+}  // namespace airan::re_demap_batch

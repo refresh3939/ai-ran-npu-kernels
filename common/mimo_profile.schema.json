@@ -22,8 +22,8 @@
       "required": ["architecture", "tx_antennas", "tx_rf_chains", "rx_antennas", "rx_rf_chains"],
       "properties": {
         "architecture": {"enum": ["full_digital", "hybrid", "analog"]},
-        "tx_antennas": {"type": "integer", "minimum": 1, "maximum": 64},
-        "tx_rf_chains": {"type": "integer", "minimum": 1, "maximum": 64},
+        "tx_antennas": {"type": "integer", "minimum": 1, "maximum": 16},
+        "tx_rf_chains": {"type": "integer", "minimum": 1, "maximum": 16},
         "rx_antennas": {"type": "integer", "minimum": 1, "maximum": 64},
         "rx_rf_chains": {"type": "integer", "minimum": 1, "maximum": 64}
       }
@@ -36,9 +36,9 @@
         "supported_ranks": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 16,
+          "maxItems": 4,
           "uniqueItems": true,
-          "items": {"type": "integer", "minimum": 1, "maximum": 16}
+          "items": {"type": "integer", "minimum": 1, "maximum": 4}
         },
         "port_policy": {
           "type": "object",
@@ -48,8 +48,8 @@
             "mode": {"enum": ["identity", "explicit"]},
             "ports_by_rank": {
               "type": "object",
-              "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
-              "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 64}
+              "propertyNames": {"pattern": "^[1-4]$"},
+              "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 4}
             }
           }
         },
@@ -61,7 +61,7 @@
             "default_mode": {"enum": ["bypass", "codebook", "non_codebook"]},
             "by_rank": {
               "type": "object",
-              "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
+              "propertyNames": {"pattern": "^[1-4]$"},
               "additionalProperties": {
                 "type": "object",
                 "additionalProperties": false,
@@ -107,9 +107,9 @@
       "properties": {
         "ports_by_rank": {
           "type": "object",
-          "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
+          "propertyNames": {"pattern": "^[1-4]$"},
           "additionalProperties": {
-            "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+            "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
             "items": {"type": "integer", "minimum": 0, "maximum": 65535}
           }
         },
@@ -127,7 +127,7 @@
         "model": {"type": "string", "minLength": 1},
         "gain_by_rank": {
           "type": "object",
-          "propertyNames": {"pattern": "^(?:[1-9]|1[0-6])$"},
+          "propertyNames": {"pattern": "^[1-4]$"},
           "additionalProperties": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
         },
         "awgn_std_int16": {"type": "number", "minimum": 0, "maximum": 200}
@@ -146,7 +146,7 @@
           "required": ["max_rx_antennas", "max_layers"],
           "properties": {
             "max_rx_antennas": {"type": "integer", "minimum": 1, "maximum": 64},
-            "max_layers": {"type": "integer", "minimum": 1, "maximum": 16}
+            "max_layers": {"type": "integer", "minimum": 1, "maximum": 4}
           }
         },
         "buckets": {
@@ -160,7 +160,7 @@
             },
             "layers": {
               "type": "array", "minItems": 1, "uniqueItems": true,
-              "items": {"type": "integer", "minimum": 1, "maximum": 16}
+              "items": {"type": "integer", "minimum": 1, "maximum": 4}
             }
           }
         },

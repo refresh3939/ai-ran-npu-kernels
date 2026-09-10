@@ -1,13 +1,13 @@
-
-
-
-
-
-
-
-
-
-
+/**
+ * @file rate_dematch_mimo_kernel.cpp
+ * Single-launch Rank-1..4 NR LDPC rate de-matching for one multi-slot codeword.
+ *
+ * The canonical NR bit planes allow inverse modulation interleaving without a
+ * Gather table: bit plane b owns f[b*E/Qm:(b+1)*E/Qm]. A resident LDPC row
+ * receives each contiguous source tile at its circular-buffer position. This
+ * also implements repetition combining when E>Ncb. Slot storage tails are
+ * skipped by splitting source ranges at every valid-prefix boundary.
+ */
 #include "kernel_operator.h"
 #include "rate_dematch_mimo.h"
 
@@ -28,7 +28,7 @@ __aicore__ inline uint32_t Min2(uint32_t a, uint32_t b)
 {
     return a < b ? a : b;
 }
-}
+}  // namespace
 
 extern "C" __global__ __aicore__ void rate_dematch_mimo_kernel(
     GM_ADDR cw_llr_gm, GM_ADDR descriptor_gm, GM_ADDR ldpc_llr_gm,

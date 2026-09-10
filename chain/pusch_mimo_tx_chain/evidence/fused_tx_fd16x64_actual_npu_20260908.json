@@ -1,0 +1,35 @@
+{
+  "schema": "airan.pusch_mimo.tx_chain.acceptance.v1",
+  "date": "2026-09-08",
+  "soc": "Ascend310P1",
+  "profile": "fd16x64_rank1_4",
+  "status": "PASS",
+  "build": {
+    "host_executable": "pusch_mimo_tx_chain",
+    "device_image": "libascendc_kernels_npu.so",
+    "kernel_count": 10,
+    "kernel_launches_per_slot": 11,
+    "single_acl_context": true,
+    "stream_count": 1,
+    "shared_device_arena": true,
+    "intermediate_host_files": false
+  },
+  "one_slot_smoke": [
+    {"rank": 1, "logical_tx_ports": 1, "tx_antennas": 16, "output_bytes": 1966080, "nonzero_i16": 981504, "saturated_i16": 0, "elapsed_ms": 6.166, "status": "PASS"},
+    {"rank": 2, "logical_tx_ports": 2, "tx_antennas": 16, "output_bytes": 1966080, "nonzero_i16": 981204, "saturated_i16": 0, "elapsed_ms": 6.133, "status": "PASS"},
+    {"rank": 3, "logical_tx_ports": 4, "tx_antennas": 16, "output_bytes": 1966080, "nonzero_i16": 981045, "saturated_i16": 0, "elapsed_ms": 6.263, "status": "PASS"},
+    {"rank": 4, "logical_tx_ports": 4, "tx_antennas": 16, "output_bytes": 1966080, "nonzero_i16": 981716, "saturated_i16": 0, "elapsed_ms": 5.519, "status": "PASS"}
+  ],
+  "full_transport_smoke": {
+    "rank": 4,
+    "logical_tx_ports": 4,
+    "tx_antennas": 16,
+    "slots": 23,
+    "output_bytes": 45219840,
+    "nonzero_i16": 22580951,
+    "saturated_i16": 0,
+    "elapsed_ms": 110.526,
+    "status": "PASS"
+  },
+  "scope": "Fused physical-antenna TX execution; coded 16TXx64RX BER is covered by loopback evidence."
+}

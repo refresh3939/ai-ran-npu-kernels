@@ -35,7 +35,9 @@ interface:
   runtime_control:
     configs: PuschMimoConfig[]
     layer_plan: MimoDetectLayerPlan
-    active_layers: "sum(config.num_layers), range [1,16]"
+    config_count: 1
+    active_layers: "config[0].num_layers, range [1,4]"
+    storage_layers: 16
 
 chain_contract:
   producer: channel_est_lmmse_mimo
@@ -58,8 +60,10 @@ execution:
   block_dim: 4
   re_per_core: 5824
   re_tile: 16
-  rx_tile_h: {NR16: 16, NR32_64: 32}
+  h_super_tile_rx: NR
+  h_permutation: mixed_radix_vnchwconv_then_32byte_row_copy
   rx_group_y: 16
+  y_output_slots: 3
   inter_core_sync: none
   kernel_launches_per_slot: 1
 
@@ -73,9 +77,9 @@ commands:
 correctness:
   comparison: fp16_storage_bit_exact
   test_plan:
-    allocation_layers: [4, 3, 2]
-    allocation_offsets: [0, 4, 7]
-    active_layers: 9
+    allocation_layers: [4]
+    allocation_offsets: [0]
+    active_layers: 4
   checks:
     - re_and_four_core_boundaries
     - rx_boundaries
@@ -89,8 +93,12 @@ verification:
   ascendc_build_ascend310p1: pass
   host_contract_ctest: pass
   upstream_active_h_golden_contract: pass
-  npu_active_layer_case: pass_active_layers_9_all_five_outputs_exact
-  npu_p50_us: 14170.6
+  npu_active_layer_case: pass_single_pusch_rank4_rx64_all_five_outputs_exact
+  npu_p50_us:
+    NR16: 2525.5
+    NR32: 4327.6
+    NR64: 8589.5
+  standard_rank4_evidence: evidence/rx64_rank4_single_pusch_actual_npu_20260910.json
   loopback_rank4_nr16: actual_npu_pass_all_five_outputs
 
 known_limitations:

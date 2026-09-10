@@ -18,7 +18,7 @@ bool IsZero(const uint8_t *data, size_t count) {
     return std::all_of(data, data + count, [](uint8_t value) { return value == 0; });
 }
 
-}
+}  // namespace
 
 MimoRuntimeConfigStatus ValidateMimoRuntimeConfig(
     const PuschMimoRuntimeConfig &config, std::string *why) {
@@ -41,13 +41,16 @@ MimoRuntimeConfigStatus ValidateMimoRuntimeConfig(
         return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
                     "unsupported MIMO architecture", why);
     }
-    const auto valid_antennas = [](uint16_t value) {
-        return value >= 1 && value <= PUSCH_MIMO_MAX_PHYSICAL_ANTENNAS;
+    const auto valid_tx = [](uint16_t value) {
+        return value >= 1 && value <= PUSCH_MIMO_MAX_TX_ANTENNAS;
     };
-    if (!valid_antennas(config.num_tx_antennas) ||
-        !valid_antennas(config.num_tx_rf_chains) ||
-        !valid_antennas(config.num_rx_antennas) ||
-        !valid_antennas(config.num_rx_rf_chains) ||
+    const auto valid_rx = [](uint16_t value) {
+        return value >= 1 && value <= PUSCH_MIMO_MAX_RX_ANTENNAS;
+    };
+    if (!valid_tx(config.num_tx_antennas) ||
+        !valid_tx(config.num_tx_rf_chains) ||
+        !valid_rx(config.num_rx_antennas) ||
+        !valid_rx(config.num_rx_rf_chains) ||
         config.num_tx_rf_chains > config.num_tx_antennas ||
         config.num_rx_rf_chains > config.num_rx_antennas) {
         return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
@@ -59,22 +62,23 @@ MimoRuntimeConfigStatus ValidateMimoRuntimeConfig(
         return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
                     "full-digital topology requires one RF chain per antenna", why);
     }
-    if (config.num_layers < 1 || config.num_layers > PUSCH_MIMO_MAX_DETECT_LAYERS ||
+    if (config.num_layers < 1 || config.num_layers > PUSCH_MIMO_MAX_PUSCH_LAYERS ||
         config.num_layers > config.num_tx_rf_chains ||
         config.num_layers > config.num_rx_rf_chains ||
         config.num_tx_ports < config.num_layers ||
+        config.num_tx_ports > PUSCH_MIMO_MAX_PUSCH_LAYERS ||
         config.num_tx_ports > config.num_tx_rf_chains) {
         return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
                     "invalid layer/port dimensions", why);
     }
     if (config.max_rx_antennas < config.num_rx_antennas ||
-        config.max_rx_antennas > PUSCH_MIMO_MAX_PHYSICAL_ANTENNAS ||
+        config.max_rx_antennas > PUSCH_MIMO_MAX_RX_ANTENNAS ||
         config.max_layers < config.num_layers ||
-        config.max_layers > PUSCH_MIMO_MAX_DETECT_LAYERS ||
+        config.max_layers > PUSCH_MIMO_MAX_PUSCH_LAYERS ||
         config.rx_bucket < config.num_rx_antennas ||
         config.rx_bucket > config.max_rx_antennas ||
         config.layer_bucket < config.num_layers ||
-        config.layer_bucket > config.max_layers) {
+        config.layer_bucket > PUSCH_MIMO_MAX_DETECT_LAYERS) {
         return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
                     "active dimensions exceed declared bucket/capacity", why);
     }
@@ -130,6 +134,15 @@ MimoRuntimeConfigStatus ValidateMimoRuntimeConfig(
          config.num_tx_ports != config.num_layers)) {
         return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
                     "invalid precoding configuration", why);
+    }
+    if (config.slot_number > 1023 || config.data_scrambling_id > 1023 ||
+        config.rnti == 0 ||
+        config.start_symbol > 13 || config.num_allocated_symbols == 0 ||
+        config.start_symbol + config.num_allocated_symbols > 14 ||
+        config.dmrs_additional_position > 3 || config.mapping_type > 1 ||
+        config.codeword_index > 1 || config.reserved16 != 0) {
+        return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
+                    "invalid dynamic PUSCH scheduler grant", why);
     }
     if (!std::isfinite(config.channel_gain) || config.channel_gain <= 0.0f ||
         config.channel_gain > 1.0f || !std::isfinite(config.awgn_std_int16) ||
@@ -211,7 +224,7 @@ MimoRuntimeConfigStatus DerivePuschMimoConfig(
     if (status != MimoRuntimeConfigStatus::kSuccess) return status;
     if (runtime.dmrs_port_count > 4 ||
         operator_rx_capacity < runtime.num_rx_antennas ||
-        operator_rx_capacity > PUSCH_MIMO_MAX_PHYSICAL_ANTENNAS ||
+        operator_rx_capacity > PUSCH_MIMO_MAX_RX_ANTENNAS ||
         runtime.num_symbols > 255) {
         return Fail(MimoRuntimeConfigStatus::kUnsupportedValue,
                     "runtime config cannot be represented by operator ABI v1", why);
@@ -227,8 +240,10 @@ MimoRuntimeConfigStatus DerivePuschMimoConfig(
     result.fft_size = runtime.fft_size;
     result.num_rb = runtime.num_rb;
     result.rb_start = runtime.rb_start;
-    result.slot_number = slot_number;
-    result.num_allocated_symbols = static_cast<uint8_t>(runtime.num_symbols);
+    result.slot_number = slot_number == 0 ? runtime.slot_number : slot_number;
+    result.start_symbol = static_cast<uint8_t>(runtime.start_symbol);
+    result.num_allocated_symbols =
+        static_cast<uint8_t>(runtime.num_allocated_symbols);
     result.used_subcarriers = runtime.used_subcarriers;
     result.padded_subcarriers = runtime.padded_subcarriers;
     result.dmrs_symbol_mask = runtime.dmrs_symbol_mask;
@@ -237,9 +252,16 @@ MimoRuntimeConfigStatus DerivePuschMimoConfig(
     }
     result.dmrs_type = static_cast<uint8_t>(runtime.dmrs_type);
     result.dmrs_length = static_cast<uint8_t>(runtime.dmrs_length);
+    result.dmrs_scrambling_id = runtime.dmrs_scrambling_id;
+    result.data_scrambling_id = runtime.data_scrambling_id;
+    result.rnti = runtime.rnti;
+    result.dmrs_additional_position =
+        static_cast<uint8_t>(runtime.dmrs_additional_position);
+    result.mapping_type = static_cast<uint8_t>(runtime.mapping_type);
     result.num_cdm_groups_without_data =
         static_cast<uint8_t>(runtime.num_cdm_groups_without_data);
     result.n_scid = static_cast<uint8_t>(runtime.n_scid);
+    result.codeword_index = static_cast<uint8_t>(runtime.codeword_index);
     result.codebook_enabled = runtime.precoding_mode ==
         static_cast<uint16_t>(MimoPrecodingMode::kCodebook);
     result.tpmi = runtime.tpmi;
@@ -249,4 +271,4 @@ MimoRuntimeConfigStatus DerivePuschMimoConfig(
     return MimoRuntimeConfigStatus::kSuccess;
 }
 
-}
+}  // namespace airan

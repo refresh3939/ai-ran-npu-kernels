@@ -1,0 +1,28 @@
+{
+  "schema": "airan.mimo_detect_bri.acceptance.v1",
+  "date": "2026-09-08",
+  "soc": "Ascend310P1",
+  "status": "PASS",
+  "configuration": {
+    "rx_antennas": 64,
+    "physical_layer_capacity": 16,
+    "active_layers": 16,
+    "bri_block": 8,
+    "pack": 0,
+    "grid_re": 23296,
+    "timed_runs": 1
+  },
+  "metrics": {
+    "xhat_evm": 0.0176,
+    "xhat_evm_limit": 0.05,
+    "no_eff_relative_median": 0.00141,
+    "no_eff_relative_median_limit": 0.1,
+    "latency_us": 9628.3
+  },
+  "outputs": {
+    "bytes_per_plane": 745472,
+    "xhat_re_sha256": "901f818bc39b53eec76cbc7f2d725615472b06a4692648b0024eecb47a5b30e0",
+    "xhat_im_sha256": "4f37c143cfa16523d741ab691ecb8093739632790228e1e40867597ff5700cdd",
+    "no_eff_sha256": "5dd47b0418d6687ef6a0e9b69d6f99101c00692acf33830a3cfd7b1df164b5c4"
+  }
+}

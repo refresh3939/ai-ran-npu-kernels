@@ -151,7 +151,7 @@ bool RunRank(uint16_t layers)
     return ldm::ValidateOpArgs(args) == ldm::LAYOUT_MISMATCH;
 }
 
-}
+}  // namespace
 
 int main()
 {

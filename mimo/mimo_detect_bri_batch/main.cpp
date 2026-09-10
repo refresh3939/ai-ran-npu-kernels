@@ -1,16 +1,16 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
+/**
+ * @file main.cpp — massive MIMO LMMSE (BRI) host runner
+ *   kernel ABI: (hrm_re, hrm_im, y_re*, y_im*, no, mask*,
+ *                xhat_re, xhat_im, no_eff, yv_re, yv_im, workspace, tiling)
+ *                * = 历史遗留的占位参数, kernel 不读, 给最小分配
+ *   与 mimo_detect_io_pack 的生产 ABI 构建期选择为:
+ *     hrm/yvpad [23296,NR,16], NR=16/32/64, no [23296], PACK=0;
+ *     xhat/no_eff [16,23296].
+ *
+ *   计时: N_WARMUP=3 / N_TIMED=20 (可用环境变量 AIRAN_WARMUP / AIRAN_TIMED 覆盖).
+ *   2026-07-26: 原来是 0/1 —— 单次测量含 launch 抖动, 同一个 64×16 跑出过
+ *   19.9/20.4/20.5/20.6ms, 根本分辨不出 5% 的差别. 出表格前必须先预热再多次取 p50.
+ */
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -76,11 +76,11 @@ int32_t main(){
         return EXIT_FAILURE;
     }
     auto plat=platform_ascendc::PlatformAscendCManager::GetInstance(soc);
-    const size_t hBytes=MimoIoMatrixElements()*sizeof(uint16_t);
+    const size_t hBytes=MimoIoMatrixElements()*sizeof(uint16_t); // [N_RE,NR,16]
     const size_t groupedYElements=airan::bri_grouped_rhs_adapter::GROUPED_ELEMS;
     const size_t groupedYBytes=groupedYElements*sizeof(uint16_t);
-    const size_t noBytes=MimoIoNoiseElements()*sizeof(uint16_t);
-    const size_t oBytes=MimoIoOutputElements()*sizeof(uint16_t);
+    const size_t noBytes=MimoIoNoiseElements()*sizeof(uint16_t); // [N_RE]
+    const size_t oBytes=MimoIoOutputElements()*sizeof(uint16_t); // [16,N_RE]
     const size_t tilBytes=TILING_TOTAL_SIZE;
     const size_t wsBytes=(size_t)plat->GetLibApiWorkSpaceSize();
     uint8_t*tilBuf=(uint8_t*)malloc(tilBytes); GenerateTiling(soc,tilBuf);
@@ -93,9 +93,9 @@ int32_t main(){
     CHECK_ACL(aclInit(nullptr));CHECK_ACL(aclrtSetDevice(0));
     aclrtStream stream=nullptr;CHECK_ACL(aclrtCreateStream(&stream));
     uint8_t *hrH,*hrD,*hiH,*hiD,*yrH,*yrD,*yiH,*yiD,*noH,*noD,*mkH,*mkD,*xrH,*xrD,*xiH,*xiD,*neH,*neD,*wsD,*tH,*tD;
-    const size_t yvBytes=MimoIoMatrixElements()*sizeof(uint16_t);
+    const size_t yvBytes=MimoIoMatrixElements()*sizeof(uint16_t); // [N_RE,NR,16]
     uint8_t *yvrH,*yvrD,*yviH,*yviD;
-
+    // Read and validate the complete host boundary before any input reaches GM.
     LoadHostExact(GIn("hrm_re.bin"),hBytes,&hrH); LoadHostExact(GIn("hrm_im.bin"),hBytes,&hiH);
     LoadHostExact(GIn("yvpad_re.bin"),yvBytes,&yvrH); LoadHostExact(GIn("yvpad_im.bin"),yvBytes,&yviH);
     LoadHostExact(GIn("no.bin"),noBytes,&noH);
@@ -109,12 +109,12 @@ int32_t main(){
         return EXIT_FAILURE;
     }
     printf("[mimo_bri][ABI] PASS: exact sizes, active-L padding, repeated yvpad and noise checked\n");
-
-
-
-
-
-
+    // io_pack exposes canonical repeated-y storage [RE,NR,16], while the
+    // optimized BRI Cube schedule consumes one 8-RE RHS group per 16-wide
+    // row: [RE/8,NR,16], with columns 0..7 holding distinct RE values.
+    // Keep validation on the public ABI, then make the internal layout
+    // conversion explicit at the kernel boundary (the same adapter used by
+    // the system-level chain).
     std::vector<uint16_t> groupedYr(groupedYElements,0);
     std::vector<uint16_t> groupedYi(groupedYElements,0);
     const auto* canonicalYr=reinterpret_cast<const uint16_t*>(yvrH);
@@ -133,8 +133,8 @@ int32_t main(){
     Upload(groupedYBytes,reinterpret_cast<const uint8_t*>(groupedYr.data()),&yvrD);
     Upload(groupedYBytes,reinterpret_cast<const uint8_t*>(groupedYi.data()),&yviD);
     Upload(noBytes,noH,&noD);
-
-
+    // hh/y/mask are retained kernel-signature slots. io_pack does not produce
+    // them and the current kernel does not read them.
     AllocOut(64,&yrH,&yrD); AllocOut(64,&yiH,&yiD); AllocOut(64,&mkH,&mkD);
     AllocOut(oBytes,&xrH,&xrD);AllocOut(oBytes,&xiH,&xiD);AllocOut(oBytes,&neH,&neD);
     CHECK_ACL(aclrtMalloc((void**)&wsD,wsBytes,ACL_MEM_MALLOC_HUGE_FIRST));

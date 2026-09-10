@@ -21,7 +21,7 @@ bool ExpectRejected(const airan::PuschMimoRuntimeConfig &config,
     return true;
 }
 
-}
+}  // namespace
 
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -36,9 +36,13 @@ int main(int argc, char **argv) {
         return 1;
     }
     auto invalid_rank = config;
-    invalid_rank.num_layers = 17;
+    invalid_rank.num_layers = 5;
     auto invalid_rx = config;
     invalid_rx.num_rx_antennas = 65;
+    auto invalid_tx = config;
+    invalid_tx.num_tx_antennas = 17;
+    auto invalid_semantic_capacity = config;
+    invalid_semantic_capacity.max_layers = 16;
     auto invalid_hash = config;
     for (auto &byte : invalid_hash.profile_sha256) byte = 0;
     auto invalid_shape = config;
@@ -47,12 +51,21 @@ int main(int argc, char **argv) {
     invalid_reserved.reserved[0] = 1;
     auto invalid_adapter_flag = config;
     invalid_adapter_flag.flags &= ~airan::PUSCH_MIMO_RUNTIME_FLAG_ADAPTER_REQUIRED;
-    if (!ExpectRejected(invalid_rank, "Rank17") ||
+    auto invalid_rnti = config;
+    invalid_rnti.rnti = 0;
+    auto invalid_allocation = config;
+    invalid_allocation.start_symbol = 13;
+    invalid_allocation.num_allocated_symbols = 2;
+    if (!ExpectRejected(invalid_rank, "single-PUSCH Rank5") ||
         !ExpectRejected(invalid_rx, "65Rx") ||
+        !ExpectRejected(invalid_tx, "17Tx") ||
+        !ExpectRejected(invalid_semantic_capacity, "single-PUSCH max_layers=16") ||
         !ExpectRejected(invalid_hash, "zero profile hash") ||
         !ExpectRejected(invalid_shape, "derived tensor shape") ||
         !ExpectRejected(invalid_reserved, "reserved field") ||
-        !ExpectRejected(invalid_adapter_flag, "missing capacity-adapter flag")) {
+        !ExpectRejected(invalid_adapter_flag, "missing capacity-adapter flag") ||
+        !ExpectRejected(invalid_rnti, "zero RNTI") ||
+        !ExpectRejected(invalid_allocation, "out-of-slot symbol allocation")) {
         return 1;
     }
     airan::PuschMimoConfig operator_config{};
@@ -62,7 +75,15 @@ int main(int argc, char **argv) {
         operator_config.num_layers != config.num_layers ||
         operator_config.num_tx_ports != config.num_tx_ports ||
         operator_config.num_rx_antennas != config.max_rx_antennas ||
-        operator_config.dmrs_ports[3] != config.dmrs_ports[3]) {
+        operator_config.dmrs_ports[3] != config.dmrs_ports[3] ||
+        operator_config.slot_number != config.slot_number ||
+        operator_config.dmrs_scrambling_id != config.dmrs_scrambling_id ||
+        operator_config.data_scrambling_id != config.data_scrambling_id ||
+        operator_config.rnti != config.rnti ||
+        operator_config.start_symbol != config.start_symbol ||
+        operator_config.num_allocated_symbols != config.num_allocated_symbols ||
+        operator_config.dmrs_additional_position != config.dmrs_additional_position ||
+        operator_config.mapping_type != config.mapping_type) {
         std::fprintf(stderr, "[FAIL] runtime-to-operator ABI derivation: %s\n",
                      why.c_str());
         return 1;

@@ -46,7 +46,7 @@ Status ValidateConfig(const PuschMimoConfig &config)
     return OK;
 }
 
-}
+}  // namespace
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            PuschMimoLayout *layout,
@@ -103,4 +103,4 @@ Status ValidateOpArgs(const QamDemod256BatchOpArgsV1 &args)
     return SameLayout(expected, *args.layout) ? OK : LAYOUT_MISMATCH;
 }
 
-}
+}  // namespace airan::qam256_demod_batch

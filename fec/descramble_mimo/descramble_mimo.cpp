@@ -98,7 +98,7 @@ int16_t SaturatingProduct(int16_t value, int16_t sign)
         std::min<int32_t>(std::numeric_limits<int16_t>::max(), product)));
 }
 
-}
+}  // namespace
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            uint32_t num_slots,
@@ -141,8 +141,8 @@ Status ValidateOpArgs(const DescrambleMimoOpArgsV1 &args)
         args.config == nullptr || args.layout == nullptr || args.stream == nullptr) {
         return INVALID_ARGUMENT;
     }
-
-
+    // The stream permutation is not safe in-place: an early output stream can
+    // overwrite a physical QAM stream that a later canonical bit still reads.
     if (args.llr_qam == args.llr_nr) return INVALID_ARGUMENT;
     PuschMimoLayout expected {};
     KernelMetadata metadata {};
@@ -247,4 +247,4 @@ Status Enqueue(const DescrambleMimoOpArgsV1 &args,
     return launch_status == ACL_ERROR_NONE ? OK : LAUNCH_FAILED;
 }
 
-}
+}  // namespace airan::descramble_mimo

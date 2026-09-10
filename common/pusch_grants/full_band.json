@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "grant_name": "full_band",
+  "slot_number": 0,
+  "rank": 4,
+  "transport": {
+    "rnti": 12345,
+    "data_scrambling_id": 321,
+    "codeword_index": 0
+  },
+  "waveform": {
+    "qm": 8,
+    "num_symbols": 14,
+    "start_symbol": 0,
+    "fft_size": 2048,
+    "num_rb": 133,
+    "rb_start": 0,
+    "used_subcarriers": 1596,
+    "padded_subcarriers": 1664,
+    "data_re_alignment": 64,
+    "qam_row_alignment": 64
+  },
+  "dmrs": {
+    "symbols": [2, 11],
+    "ports": "auto",
+    "scrambling_id": 321,
+    "type": 1,
+    "length": 1,
+    "additional_position": 0,
+    "mapping_type": 0,
+    "num_cdm_groups_without_data": 2,
+    "n_scid": 0
+  },
+  "precoding": {"mode": "auto", "prg_size_rb": 4},
+  "loopback_channel": {
+    "model": "deterministic_unitary",
+    "gain": 0.16,
+    "awgn_std_int16": 80
+  }
+}

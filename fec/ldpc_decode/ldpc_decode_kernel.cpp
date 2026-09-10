@@ -1,9 +1,9 @@
-
-
-
-
-
-
+// ============================================================================
+// 5G NR LDPC decoder kernel — BG1, Z=384, MB=46, KB=22, MAX_DEG=19.
+// Target: Ascend 310P1 (dav_m200). Layered Normalized Min-Sum, 4-core CB split.
+// Verified: ~7.23--7.29 ms host / 6.785 ms AICore / 5.609 ms Vector
+// (3 fixed iterations, 143 CB, CB_GROUP=2, 4 cores, SNR=5 dB).
+// ============================================================================
 
 #include "kernel_operator.h"
 #include "ldpc_decode.h"
@@ -29,19 +29,19 @@ constexpr uint32_t UB_DEG_Z_BYTES    = CB_GROUP * MAX_DEG * Z * sizeof(half);
 constexpr uint32_t UB_CONST_Z_BYTES  = Z * sizeof(half);
 constexpr uint32_t UB_GROUP_Z_BYTES  = ROW_GROUP * CB_GROUP * Z * sizeof(half);
 constexpr uint32_t UB_DEG_BYTES      = DEG_PADDED  * sizeof(int16_t);
-
+// The mask is consumed immediately for each CB lane, so lanes reuse it.
 constexpr uint32_t UB_MASK_BYTES     = 3 * MAX_DEG * 32;
 constexpr uint32_t UB_PREV_ROW_BYTES = CB_GROUP * MAX_DEG * Z * sizeof(int8_t);
 
-
-
+// Adjacent rows in these pairs have equal degree and no common block-column,
+// so their layered updates commute and may share one Vector instruction stream.
 __aicore__ inline bool FuseNextRow(uint32_t br)
 {
     return br == 16 || br == 20 || br == 22 || br == 25 || br == 28 ||
            br == 30 || br == 32 || br == 34 || br == 38 || br == 43;
 }
 
-
+// CyclicShift: dst[i] = src[(i + sh) mod Z].
 __aicore__ inline void CyclicShift(const LocalTensor<half>& dst,
                                    const LocalTensor<half>& src,
                                    uint32_t sh)
@@ -59,9 +59,9 @@ __aicore__ inline void CyclicShift(const LocalTensor<half>& dst,
     }
 }
 
-
-
-
+// Both tensors use [item][cb_lane][z], so one instruction stream rotates both
+// lanes for aligned MTE copies. Arbitrary shifts retain the proven per-lane
+// Vector path: the attempted Level-0 continuous-mask variant was not bit-exact.
 __aicore__ inline void CyclicShiftInterleaved(const LocalTensor<half>& dst,
                                               const LocalTensor<half>& src,
                                               uint32_t sh,
@@ -90,8 +90,8 @@ __aicore__ inline void CyclicShiftInterleaved(const LocalTensor<half>& dst,
     }
 }
 
-
-
+// Hot-loop specializations. Graph metadata is partitioned by shift class once
+// at kernel entry, so these paths avoid per-edge zero/alignment dispatch.
 template <uint32_t BATCH>
 __aicore__ inline void CyclicShiftZero(const LocalTensor<half>& dst,
                                        const LocalTensor<half>& src)
@@ -150,8 +150,8 @@ __aicore__ inline void CyclicShiftDynamic(const LocalTensor<half>& dst,
     }
 }
 
-
-
+// BATCH and ROWS are hot-path invariants.  Keeping them in the type removes
+// per-edge CB/row loop control and lets the compiler fold all lane strides.
 template <uint32_t BATCH, uint32_t ROWS>
 __aicore__ inline void GatherShiftDispatch(
     const LocalTensor<half>& dst,
@@ -193,10 +193,10 @@ __aicore__ inline void GatherShiftDispatch(
     }
 }
 
-
-
-
-
+// The first iteration starts in public variable coordinates, whereas later
+// iterations start at the last incident edge coordinate.  Its edge ordering
+// follows the steady-state plan for message-slot stability, so shift class is
+// selected per edge only on this one cold iteration.
 template <uint32_t BATCH, uint32_t ROWS>
 __aicore__ inline void GatherShiftDynamic(
     const LocalTensor<half>& dst,
@@ -219,9 +219,9 @@ __aicore__ inline void GatherShiftDynamic(
     }
 }
 
-
-
-
+// ext is already expressed in this edge's check coordinate.  Make that the
+// resident coordinate for the variable column, replacing inverse-shift
+// scatter with one contiguous UB-to-UB copy.
 template <uint32_t BATCH, uint32_t ROWS>
 __aicore__ inline void ScatterResident(
     const LocalTensor<half>& dst,
@@ -242,8 +242,8 @@ __aicore__ inline void ScatterResident(
     }
 }
 
-
-
+// BG1 has only nine check degrees.  Specializing the reduction removes the
+// dynamic edge loop and fixes the broadcast repeat count at compile time.
 template <uint32_t DEG>
 __aicore__ inline void CheckNodeDegree(
     const LocalTensor<half>& sign_prod,
@@ -299,7 +299,7 @@ __aicore__ inline void CheckNodeDegree(
     }
 }
 
-
+// Restore one moving-coordinate posterior column at final egress.
 __aicore__ inline void RotateColumnInPlace(const LocalTensor<half>& column,
                                            const LocalTensor<half>& scratch,
                                            uint32_t sh,
@@ -310,7 +310,7 @@ __aicore__ inline void RotateColumnInPlace(const LocalTensor<half>& column,
     Adds(column, scratch, (half)0.0f, (int32_t)(batch * Z));
 }
 
-}
+}  // namespace
 
 extern "C" __global__ __aicore__ void ldpc_decode_kernel(
     GM_ADDR lam_in_gm,
@@ -376,11 +376,11 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
 
     auto prev_row_i8 = bufPrevRow.Get<int8_t>();
 
-
-
+    // Gathered values become extrinsic values in place after subtracting the
+    // old row message.  This lifetime alias removes one MAX_DEG-sized buffer.
     auto gath_h      = bufGath  .Get<half>();
     auto ext         = bufGath  .Get<half>();
-    auto bits_ub     = bufGath  .Get<int8_t>();
+    auto bits_ub     = bufGath  .Get<int8_t>();     // alias: ext dies at S6
 
     auto sgn         = bufSgn   .Get<half>();
     auto new_msg_h   = bufNewMsg.Get<half>();
@@ -391,15 +391,15 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
     auto sign_prod   = bufSignProd.Get<half>();
     auto row_mask    = bufMask.Get<uint8_t>();
 
-
-
-
-
-
-
+    // dav_m200 cannot safely dereference large global constexpr tables from
+    // device code.  Stage the small fixed graph once through UB, then keep a
+    // packed scalar-stack views for the hot loop: [shift:16 | block_col:16].
+    // A posterior column remains in the coordinate of its most recently
+    // processed edge.  Iteration zero therefore has a distinct delta-shift
+    // plan; iterations one and two share the cyclic steady-state plan.
     uint8_t row_degree[MB];
     uint16_t last_shift[airan::LDPC_NFULL] = {};
-
+    // Steady-state plan: low byte ends zero shifts, high byte aligned shifts.
     uint16_t row_shift_split[MB];
     uint32_t graph_meta_first[airan::PACKED_ELEMS_TOTAL];
     uint32_t graph_meta_steady[airan::PACKED_ELEMS_TOTAL];
@@ -481,8 +481,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
     constexpr uint8_t  Z_BLK_STRIDE  = (uint8_t)(Z / ALIGN16);
     constexpr uint8_t  Z_REPS        = (uint8_t)(Z / 128);
 
-
-
+    // All repeat descriptors are graph invariants.  Construct them once per
+    // kernel instead of once per check row (46 rows x 3 iterations x ~36 CBs).
     const UnaryRepeatParams  cast_i8_to_h_p {1, 1, 8, 4};
     const BinaryRepeatParams flat_bin_p     {1, 1, 1, 8, 8, 8};
     const UnaryRepeatParams  flat_abs_p     {1, 1, 8, 8};
@@ -491,8 +491,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
     const UnaryRepeatParams  alpha_p        {1, 1, 8, 8};
     const BinaryRepeatParams msg_cast_p     {1, 1, 1, 4, 8, 8};
 
-
-
+    // Two independent CBs share one instruction stream.  Check rows retain
+    // their layered order; only the CB dimension is batched.
     constexpr uint16_t PREV_EDGE_BLOCKS = (uint16_t)(Z * sizeof(int8_t) / 32);
     const uint32_t cb_begin = (C_NUM * aiv_id) / BLOCK_DIM;
     const uint32_t cb_end   = (C_NUM * (aiv_id + 1)) / BLOCK_DIM;
@@ -501,8 +501,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
         const uint32_t lam_elems = batch * (uint32_t)airan::LAM_ELEMS_PER_CB;
         const size_t cb_lam_base = (size_t)cb_base * airan::LAM_ELEMS_PER_CB;
 
-
-
+        // Convert CB-major GM input to [block_col][cb_lane][z] once.  This
+        // makes every later cyclic shift naturally batchable across CB lanes.
         if (batch == 1) {
             DataCopy(lam_pad_i16, lamInG[cb_lam_base], lam_elems);
         } else {
@@ -520,8 +520,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
         WaitFlag<HardEvent::MTE2_V>(EVENT_ID0);
         Cast(lam_pad, lam_pad_i16, RoundMode::CAST_NONE, (int32_t)lam_elems);
 
-
-
+        // The CB group is fixed here; row-group-dependent strides are formed
+        // below only once per fused/single row group.
         DataCopyParams load_prev;
         load_prev.blockLen = PREV_EDGE_BLOCKS;
         load_prev.srcStride = 0;
@@ -548,8 +548,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
                     1, 1, 1, row_group_blk_stride, 0, row_group_blk_stride};
                 const uint32_t row_slot = group_seq & 1;
                 auto prev_i8 = prev_row_i8[row_slot * UB_PREV_ROW_BYTES];
-
-
+                // A slot is reused only after one complete intervening row, so
+                // the previous MTE3 store overlaps that row's Vector work.
                 if (store_pending[row_slot]) {
                     if (row_slot == 0) {
                         WaitFlag<HardEvent::MTE3_V>(EVENT_ID4);
@@ -559,8 +559,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
                     store_pending[row_slot] = false;
                 }
 
-
-
+                // T1: iteration 0 has zero old messages.  Later iterations load
+                // two CB-major GM rows into edge-major UB with one 2D copy/CB.
                 if (iter == 0) {
                     Duplicate<half>(prev_h, (half)0.0f, (int32_t)work_elems);
                 } else {
@@ -584,9 +584,9 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
                                               (uint64_t)128, edge_reps, cast_i8_to_h_p);
                 }
 
-
-
-
+                // T2: [edge][row][cb][z] keeps independent rows/CBs adjacent
+                // under one repeat descriptor. Each row's edges are already
+                // partitioned by shift class, so no per-edge dispatch remains.
                 if (iter == 0) {
                     if (batch == 2) {
                         if (row_count == 2) {
@@ -633,8 +633,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
                        SELMODE::VSEL_TENSOR_TENSOR_MODE,
                        (uint64_t)128, edge_reps, sign_sel_p);
 
-
-
+                // T4/T6/T7: degree is one of nine BG1 constants.  Dispatch
+                // once per row group, then run a fully unrolled reduction.
 #define RUN_CHECK_DEG(D) \
                 case D: CheckNodeDegree<D>(sign_prod, sgn, min1, min2, \
                                             new_msg_h, row_mask, row_lanes, \
@@ -656,12 +656,12 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
 
                 MulAddDst<half, half, false>(ext, sgn, new_msg_h,
                                              (uint64_t)128, edge_reps, flat_bin_p);
+                // Keep the layered posterior in FP16 without per-edge
+                // saturation.  The previous +/-20 Q8.8 clamp cost two full
+                // Vector passes after every row; clamp once at final export.
 
-
-
-
-
-
+                // Preserve messages only for the next iteration.  The 2D copy
+                // converts edge-major UB back to contiguous per-CB GM rows.
                 if (iter + 1 < MAX_ITER) {
                     MulCast<int8_t, half>(prev_i8, sgn, new_msg_h,
                                           (uint64_t)128, edge_reps, msg_cast_p);
@@ -689,9 +689,9 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
                     store_pending[row_slot] = true;
                 }
 
-
-
-
+                // T10: keep each posterior column in this edge's coordinate.
+                // Fused rows have disjoint columns, so these writes cannot
+                // alias.  The next gather consumes the precomputed delta.
                 if (batch == 2) {
                     if (row_count == 2) {
                         ScatterResident<2, 2>(lam_pad, ext,
@@ -715,8 +715,8 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
             WaitFlag<HardEvent::MTE3_V>(EVENT_ID7);
         }
 
-
-
+        // Return from each column's last-edge coordinate to the public
+        // variable-node order before exporting LLRs and making hard decisions.
         for (uint32_t bc = 0; bc < airan::LDPC_NFULL; ++bc) {
             const uint32_t coord = last_shift[bc];
             const uint32_t inv_anchor = (coord == 0) ? 0 : (Z - coord);
@@ -724,14 +724,14 @@ extern "C" __global__ __aicore__ void ldpc_decode_kernel(
                                 inv_anchor, batch);
         }
 
-
-
+        // One final clamp preserves the public Q8.8 posterior range while
+        // avoiding two full edge-workspace passes after every check row.
         Mins(lam_pad, lam_pad, (half)(float)airan::LLR_CLIP_FX,
              (int32_t)lam_elems);
         Maxs(lam_pad, lam_pad, (half)-(float)airan::LLR_CLIP_FX,
              (int32_t)lam_elems);
 
-
+        // Export posterior, then restore the half view for hard decisions.
         Cast(lam_pad_i16, lam_pad, RoundMode::CAST_RINT, (int32_t)lam_elems);
         SetFlag<HardEvent::V_MTE3>(EVENT_ID5);
         WaitFlag<HardEvent::V_MTE3>(EVENT_ID5);

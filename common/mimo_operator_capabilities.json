@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "registry_name": "clean_pusch_mimo_npu_v1",
-  "target": "Ascend NPU staged PUSCH MIMO loopback",
+  "registry_name": "clean_pusch_mimo_npu_v2",
+  "target": "Ascend NPU PUSCH MIMO, 1..16TX x 1..64RX",
   "variants": [
     {
-      "name": "rx16_layer16_rank4",
+      "name": "rx16_storage16_rank4",
       "constraints": [
         {"path": "active.rank", "equals": 4},
         {"path": "topology.rx_antennas", "maximum": 16},
         {"path": "receiver.max_rx_antennas", "equals": 64},
-        {"path": "receiver.max_layers", "equals": 16},
+        {"path": "receiver.max_layers", "equals": 4},
         {"path": "waveform.num_symbols", "equals": 14},
         {"path": "waveform.used_subcarriers", "equals": 1596},
         {"path": "waveform.padded_subcarriers", "equals": 1664}
@@ -30,12 +30,12 @@
       }
     },
     {
-      "name": "rx64_layer16_rank1_4",
+      "name": "rx64_storage16_rank1_4",
       "constraints": [
         {"path": "active.rank", "allowed": [1, 2, 3, 4]},
         {"path": "topology.rx_antennas", "maximum": 64},
         {"path": "receiver.max_rx_antennas", "equals": 64},
-        {"path": "receiver.max_layers", "equals": 16},
+        {"path": "receiver.max_layers", "equals": 4},
         {"path": "waveform.num_symbols", "equals": 14},
         {"path": "waveform.used_subcarriers", "equals": 1596},
         {"path": "waveform.padded_subcarriers", "equals": 1664}
@@ -58,14 +58,14 @@
   ],
   "operators": [
     {
-      "name": "host_full_digital_channel_8x8",
+      "name": "full_digital_radio_boundary",
       "scope": "host_boundary",
       "implementation": "chain/pusch_mimo_loopback/radio_profile.py",
       "required": true,
       "constraints": [
         {"path": "topology.architecture", "equals": "full_digital"},
-        {"path": "topology.tx_antennas", "equals": 8},
-        {"path": "topology.rx_antennas", "equals": 8}
+        {"path": "topology.tx_antennas", "maximum": 16},
+        {"path": "topology.rx_antennas", "maximum": 64}
       ]
     },
     {
@@ -119,6 +119,17 @@
       ]
     },
     {
+      "name": "tx_antenna_map",
+      "scope": "tx",
+      "implementation": "mimo/pusch_codebook_precode",
+      "required": true,
+      "constraints": [
+        {"path": "active.logical_tx_ports", "allowed": [1, 2, 4]},
+        {"path": "topology.tx_antennas", "maximum": 16},
+        {"path": "spatial.antenna_mapping", "equals": "semi_unitary_dft"}
+      ]
+    },
+    {
       "name": "ofdm_mod_batch",
       "scope": "tx",
       "implementation": "ofdm/ofdm_mod_batch",
@@ -157,7 +168,7 @@
       "required": true,
       "constraints": [
         {"path": "active.rank", "allowed": [1, 2, 3, 4]},
-        {"path": "topology.rx_antennas", "equals": 8},
+        {"path": "topology.rx_antennas", "maximum": 64},
         {"path": "waveform.used_subcarriers", "equals": 1596}
       ]
     },
@@ -168,9 +179,9 @@
       "required": true,
       "constraints": [
         {"path": "active.rank", "allowed": [1, 2, 3, 4]},
-        {"path": "topology.rx_antennas", "equals": 8},
+        {"path": "topology.rx_antennas", "maximum": 64},
         {"path": "receiver.max_rx_antennas", "equals": 64},
-        {"path": "receiver.max_layers", "equals": 16}
+        {"path": "receiver.max_layers", "equals": 4}
       ]
     },
     {
@@ -181,7 +192,7 @@
       "constraints": [
         {"path": "active.rank", "allowed": [1, 2, 3, 4]},
         {"path": "receiver.max_rx_antennas", "equals": 64},
-        {"path": "receiver.max_layers", "equals": 16},
+        {"path": "receiver.max_layers", "equals": 4},
         {"path": "waveform.padded_subcarriers", "equals": 1664}
       ]
     },

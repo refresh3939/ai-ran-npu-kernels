@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file descramble_mimo.h
+ * Stable compact-codeword PUSCH MIMO descrambling contract.
+ */
 #pragma once
 
 #include <cstddef>
@@ -23,7 +23,7 @@ constexpr uint32_t BLOCK_DIM = 4;
 constexpr uint32_t TILE_ELEMS = 32768;
 constexpr uint32_t META_WORDS = 32;
 constexpr size_t TILING_BYTES = META_WORDS * sizeof(uint32_t);
-
+// A valid pointer is retained for combined-build HAVE_WORKSPACE compatibility.
 constexpr size_t WORKSPACE_BYTES = 128;
 
 constexpr uint32_t QAM_STREAM_TO_NR_BIT[Q_M] = {0, 2, 4, 6, 1, 3, 5, 7};
@@ -41,10 +41,10 @@ enum Status : int32_t {
     LAUNCH_FAILED = -5,
 };
 
-
-
-
-
+// Standard chain ABI. llr_qam is the compact output of layer_demap:
+// [num_slots,Qm,codeword_stride], with physical grouped-I/Q q streams.
+// llr_nr has the same shape but canonical NR bit streams b=0..7.
+// Gold/sign is adapter-owned and therefore deliberately absent here.
 struct DescrambleMimoOpArgsV1 {
     uint16_t abi_version;
     uint16_t struct_size;
@@ -56,7 +56,7 @@ struct DescrambleMimoOpArgsV1 {
     void *stream;
 };
 
-
+// Private single-launch descriptor copied to the trailing tiling buffer.
 struct KernelMetadata {
     uint32_t magic;
     uint32_t num_slots;
@@ -73,7 +73,7 @@ struct KernelMetadata {
 static_assert(sizeof(KernelMetadata) == TILING_BYTES,
               "descramble_mimo metadata ABI must remain 128 bytes");
 
-constexpr uint32_t META_MAGIC = 0x444d4d31u;
+constexpr uint32_t META_MAGIC = 0x444d4d31u;  // "DMM1"
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            uint32_t num_slots,
@@ -82,15 +82,15 @@ Status BuildCurrentProfile(const PuschMimoConfig &config,
 
 Status ValidateOpArgs(const DescrambleMimoOpArgsV1 &args);
 
-
-
+// Builds sign=(1-2*c) in compact canonical-NR layout. Gold advances over
+// transmitted bits only; the L*48 storage tail in every slot does not consume c.
 Status BuildGoldSign(const PuschMimoConfig &config,
                      const PuschMimoLayout &layout,
                      uint32_t num_slots,
                      int16_t *sign,
                      size_t sign_elems);
 
-
+// Bit-exact host reference. Input tail is ignored and output tail is zeroed.
 Status ReferenceDescramble(const int16_t *llr_qam,
                            const int16_t *sign,
                            const PuschMimoConfig &config,
@@ -98,8 +98,8 @@ Status ReferenceDescramble(const int16_t *llr_qam,
                            uint32_t num_slots,
                            int16_t *llr_nr);
 
-
-
+// Runtime-adapter entry. sign, workspace and tiling are cached device resources.
+// One native kernel is enqueued for the complete slot batch; no synchronization.
 Status Enqueue(const DescrambleMimoOpArgsV1 &args,
                const void *sign,
                size_t sign_bytes,
@@ -112,4 +112,4 @@ constexpr size_t BufferElems(uint32_t num_slots, uint32_t layers) {
     return static_cast<size_t>(num_slots) * Q_M * layers * N_DATA_PAD;
 }
 
-}
+}  // namespace airan::descramble_mimo

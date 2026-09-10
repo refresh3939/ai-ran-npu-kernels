@@ -24,7 +24,7 @@ bool ReservedIsZero(const PuschMimoConfig &config)
     return true;
 }
 
-}
+}  // namespace
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            PuschMimoLayout *layout,
@@ -195,4 +195,4 @@ Status ValidateLmmse798Compatibility(const uint16_t *pilot_count,
     return OK;
 }
 
-}
+}  // namespace airan::mimo_dmrs_ls

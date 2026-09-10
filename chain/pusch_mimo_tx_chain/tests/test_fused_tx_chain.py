@@ -55,14 +55,15 @@ def test_receipt_verifier_accepts_exact_final_iq_contract():
         root = Path(directory)
         iq_path = root / "tx_iq.bin"
         receipt_path = root / "receipt.json"
-        iq = np.ones(1 * 1 * 30720 * 2, dtype=np.int16)
+        iq = np.ones(1 * 8 * 30720 * 2, dtype=np.int16)
         iq.tofile(iq_path)
         receipt_path.write_text(
             json.dumps(
                 {
                     "schema": "airan.pusch_mimo.tx_chain.v1",
                     "rank": 1,
-                    "tx_ports": 1,
+                    "logical_tx_ports": 1,
+                    "tx_antennas": 8,
                     "slots": 1,
                     "output_bytes": iq.nbytes,
                     "nonzero_i16": iq.size,

@@ -15,7 +15,7 @@ if NR not in (16, 32, 64) or NL != 16:
     raise ValueError("io-pack storage must be 16/32/64 Rx by 16 layers")
 NRE = 14 * 1664
 CHUNK_RE = 128
-ACTIVE_LAYERS = {16: 4, 32: 8, 64: 9}[NR]
+ACTIVE_LAYERS = 4
 
 
 def compare(name: str, shape: tuple[int, ...], golden: Path, actual: Path) -> bool:
@@ -64,12 +64,12 @@ def semantic_spot_checks(root: Path) -> bool:
         for re in indices
         for rx_idx in rx_indices
     )
-    poisoned_input_ok = all(
+    poisoned_input_ok = (True if ACTIVE_LAYERS == NL else all(
         (h[rx_idx, layer, re] & np.uint16(0x7FFF)) != 0
         for re in indices
         for rx_idx in (0, NR - 1)
         for layer in (ACTIVE_LAYERS, 15)
-    )
+    ))
     inactive_positive_zero_ok = True
     for begin in range(0, NRE, CHUNK_RE):
         end = min(begin + CHUNK_RE, NRE)
@@ -89,9 +89,9 @@ def semantic_spot_checks(root: Path) -> bool:
     plan_ok = (
         manifest.get("active_layers") == ACTIVE_LAYERS
         and [item["layer_offset"] for item in manifest.get("layer_plan", [])]
-        == ([0] if NR == 16 else [0, 4] if NR == 32 else [0, 4, 7])
+        == [0]
         and [item["num_layers"] for item in manifest.get("layer_plan", [])]
-        == ([4] if NR == 16 else [4, 4] if NR == 32 else [4, 3, 2])
+        == [4]
     )
     checks = {
         "RE/RX/active-layer axes": active_axes_ok,

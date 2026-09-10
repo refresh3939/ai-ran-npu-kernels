@@ -1,7 +1,7 @@
-
-
-
-
+// Single-launch Rank-1..4 256-QAM batch demapper.
+//
+// The verified SISO batch-3 pairwise math is unchanged. Four fixed AIVs retain
+// ownership of three data symbols each and traverse all layers in one launch.
 #include "kernel_operator.h"
 #include "qam256_demod_batch.h"
 #include "../qam_demod_256_siso/qam256_demod.h"
@@ -31,7 +31,7 @@ __aicore__ inline uint32_t DataSymToPhys(uint32_t ds)
     if (ds < 10) return ds + 1;
     return ds + 2;
 }
-}
+}  // namespace
 
 extern "C" __global__ __aicore__ void qam256_demod_batch_kernel(
     GM_ADDR x_re_gm, GM_ADDR x_im_gm, GM_ADDR no_eff_gm,
@@ -58,8 +58,8 @@ extern "C" __global__ __aicore__ void qam256_demod_batch_kernel(
     pipe.InitBuffer(bTmp4, BATCH_BYTES);
     pipe.InitBuffer(bMask, MASK_BYTES);
 
-
-
+    // One scalar GM read is cheaper than staging the full 128-byte descriptor.
+    // Field 8 is BatchTilingData::num_layers.
     const uint32_t numLayers =
         *reinterpret_cast<__gm__ uint32_t *>(tiling_gm + 8 * sizeof(uint32_t));
     if (numLayers == 0 || numLayers > qdb::MAX_LAYERS) return;

@@ -28,7 +28,7 @@ airan::PuschMimoConfig MakeConfig(uint16_t numRx)
     return config;
 }
 
-}
+}  // namespace
 
 int main()
 {

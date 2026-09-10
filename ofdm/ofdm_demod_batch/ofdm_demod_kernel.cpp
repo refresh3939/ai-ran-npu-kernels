@@ -1,33 +1,33 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/**
+ * @file ofdm_demod_kernel.cpp — 5G NR OFDM Demodulator (Ascend 310P3 / dav_m200)
+ *
+ * 算法: 2048-FFT 分解为 32×64 mixed-radix Cooley-Tukey
+ *   Phase 0: CP removal + IQ de-interleave   (vector, GatherMask)
+ *   Phase 1: DFT-32  X1 = (W32/sqrt(32)) @ X (cube, K=32)
+ *   Phase 2: twiddle Tw = X1 ⊙ twiddle       (vector)
+ *   Phase 3: DFT-64  Y  = Tw @ (W64/sqrt(64))^T (cube, K=64)
+ *
+ * 两级矩阵预折叠 1/sqrt(32) 与 1/sqrt(64)，输出直接满足 unitary FFT；
+ * kernel 不增加额外归一化 Vector 指令。
+ *
+ * V2 优化: cmatrixInitVal=false fused Mmad
+ *   - 复数实部 X1_re = W_re·X_re + (-W_im)·X_im  (W_im 预先取负)
+ *   - 复数虚部 X1_im = W_re·X_im + W_im·X_re     (本来就是 Add)
+ *   - 两次 Mmad 累加到同一 L0C, 省外面的 Sub/Add + PIPE_ALL barrier
+ *
+ * ofdm_mod 对称优化:
+ *   - Phase 1 的 W32 常驻 L0A，并让同一 RHS tile 同时服务实/虚两个输出
+ *   - Phase 3 将同核 symbol 沿 M 合并为 M<=128，W64 常驻 L0B
+ *   - 每核数据完全独立，用局部 pipe event 取代跨核 SyncAll
+ *   - batch 路径将两个 phase hand-off 留在 L1，删除 GM scratch；常量驻留
+ *     在 L1，并在每个 tile 重新装入 L0，避免相邻 Cube 阶段覆盖 L0 内容
+ *
+ * dav_m200 限制:
+ *   - Matmul 高层 API 不能在同一 kernel 内多 mm 不同 tiling → 用基础 Mmad ISA
+ *   - 实测 M=32 N=64 单 Mmad 输出后半零 → N=64 切 4 个 N=16 sub-cube
+ *
+ * 共享常量见 ofdm_demod.h
+ */
 #define OFDM_DEMOD_BATCH
 
 #include "kernel_operator.h"
@@ -37,9 +37,9 @@ using namespace AscendC;
 using namespace ofdm_demod_batch;
 
 
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  OfdmDemod class
+// ═══════════════════════════════════════════════════════════════
 class OfdmDemod {
 public:
     __aicore__ inline OfdmDemod() {}
@@ -77,7 +77,7 @@ private:
                                           const LocalTensor<float> &tmp,
                                           uint16_t m = M_MMAD);
 
-
+    // ★ 优化: fused 2-Mmad 累加, 输出 dst = A1·B1 + A2·B2
     __aicore__ inline void RunCubeP1_ComplexTileReuse(
         const LocalTensor<half> &wReL0,
         const LocalTensor<half> &wImL0,
@@ -137,22 +137,22 @@ private:
     TQue<TPosition::CO1, 2> qCO1_;
 #endif
 
-
+    // 持久 L1: W matrix + W_im 取负副本
     TBuf<TPosition::A1> bufW32reL1_, bufW32imL1_, bufW32imNegL1_;
     TBuf<TPosition::B1> bufW64reL1_, bufW64imL1_, bufW64imNegL1_;
 #ifdef OFDM_DEMOD_BATCH
-
+    // mod_batch-style on-chip hand-off: Phase 0→1 uses B1, Phase 2→3 uses A1.
     TBuf<TPosition::B1> bufXReL1_, bufXImL1_;
     TBuf<TPosition::A1> bufTwReL1_, bufTwImL1_;
 #endif
-    TBuf<TPosition::A2> bufW32L0A_;
-    TBuf<TPosition::B2> bufW64L0B_;
+    TBuf<TPosition::A2> bufW32L0A_;  // 3 × 32 × 32 half = 6 KiB
+    TBuf<TPosition::B2> bufW64L0B_;  // 3 × 64 × 64 half = 24 KiB
 };
 
 
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════════════════════════
 __aicore__ inline void OfdmDemod::Init(
     GM_ADDR input_gm,
     GM_ADDR w32_re_gm, GM_ADDR w32_im_gm,
@@ -197,7 +197,7 @@ __aicore__ inline void OfdmDemod::Init(
 #endif
 
 #ifndef OFDM_DEMOD_BATCH
-
+    // In the one-shot kernel Phase 0/1 X scratch can be reused by Phase 2 Tw.
     constexpr uint32_t SCR_PER_CORE = 2 * BATCH_X_ELEMS;
     auto sbase = reinterpret_cast<__gm__ half *>(scratch_gm) + blockId_ * SCR_PER_CORE;
     XreScr_ .SetGlobalBuffer(sbase + 0 * BATCH_X_ELEMS, BATCH_X_ELEMS);
@@ -206,52 +206,52 @@ __aicore__ inline void OfdmDemod::Init(
     TwImScr_.SetGlobalBuffer(sbase + 1 * BATCH_X_ELEMS, BATCH_X_ELEMS);
 #endif
 
+    // UB buffers
+    pipe_->InitBuffer(bufXi16_,      2 * N_FFT * sizeof(int16_t));   // 8 KB
+    pipe_->InitBuffer(bufXfullHalf_, 2 * N_FFT * sizeof(half));      // 8 KB
+    pipe_->InitBuffer(bufXre_,       TILE_PQ   * sizeof(half));      // 4 KB
+    pipe_->InitBuffer(bufXim_,       TILE_PQ   * sizeof(half));      // 4 KB
+    pipe_->InitBuffer(bufTmp_,       TILE_PQ   * sizeof(half));      // 4 KB
+    pipe_->InitBuffer(bufTmp2_,      TILE_PQ   * sizeof(half));      // 4 KB
+    pipe_->InitBuffer(bufTwRe_,      TILE_PQ   * sizeof(half));      // 4 KB
+    pipe_->InitBuffer(bufTwIm_,      TILE_PQ   * sizeof(half));      // 4 KB
+    pipe_->InitBuffer(bufX1re_,      BATCH_X_ELEMS * sizeof(half));  // 16 KB
+    pipe_->InitBuffer(bufX1im_,      BATCH_X_ELEMS * sizeof(half));  // 16 KB
+    pipe_->InitBuffer(bufCubeAcc_,   BATCH_X_ELEMS * sizeof(float)); // 32 KB
+    pipe_->InitBuffer(bufCubeNd_,    BATCH_X_ELEMS * sizeof(float)); // 32 KB
 
-    pipe_->InitBuffer(bufXi16_,      2 * N_FFT * sizeof(int16_t));
-    pipe_->InitBuffer(bufXfullHalf_, 2 * N_FFT * sizeof(half));
-    pipe_->InitBuffer(bufXre_,       TILE_PQ   * sizeof(half));
-    pipe_->InitBuffer(bufXim_,       TILE_PQ   * sizeof(half));
-    pipe_->InitBuffer(bufTmp_,       TILE_PQ   * sizeof(half));
-    pipe_->InitBuffer(bufTmp2_,      TILE_PQ   * sizeof(half));
-    pipe_->InitBuffer(bufTwRe_,      TILE_PQ   * sizeof(half));
-    pipe_->InitBuffer(bufTwIm_,      TILE_PQ   * sizeof(half));
-    pipe_->InitBuffer(bufX1re_,      BATCH_X_ELEMS * sizeof(half));
-    pipe_->InitBuffer(bufX1im_,      BATCH_X_ELEMS * sizeof(half));
-    pipe_->InitBuffer(bufCubeAcc_,   BATCH_X_ELEMS * sizeof(float));
-    pipe_->InitBuffer(bufCubeNd_,    BATCH_X_ELEMS * sizeof(float));
-
-
-    pipe_->InitBuffer(qA1_,  2, MAX_M_BATCH * Q * sizeof(half));
-    pipe_->InitBuffer(qA2_,  2, MAX_M_BATCH * Q * sizeof(half));
-    pipe_->InitBuffer(qB1_,  2, Q * Q * sizeof(half));
-    pipe_->InitBuffer(qB2_,  2, Q * Q * sizeof(half));
+    // Mmad queues
+    pipe_->InitBuffer(qA1_,  2, MAX_M_BATCH * Q * sizeof(half));     // 2×16 KB
+    pipe_->InitBuffer(qA2_,  2, MAX_M_BATCH * Q * sizeof(half));     // 2×16 KB
+    pipe_->InitBuffer(qB1_,  2, Q * Q * sizeof(half));               // 2×8 KB
+    pipe_->InitBuffer(qB2_,  2, Q * Q * sizeof(half));               // 2×8 KB
 #ifdef OFDM_DEMOD_BATCH
-    pipe_->InitBuffer(qCO1_, 4, M_MMAD * Q * sizeof(float));
+    pipe_->InitBuffer(qCO1_, 4, M_MMAD * Q * sizeof(float));         // 4×8 KB
 #else
-    pipe_->InitBuffer(qCO1_, 2, M_MMAD * Q * sizeof(float));
+    pipe_->InitBuffer(qCO1_, 2, M_MMAD * Q * sizeof(float));         // 2×8 KB
 #endif
 
-
-    pipe_->InitBuffer(bufW32reL1_,    P * P * sizeof(half));
-    pipe_->InitBuffer(bufW32imL1_,    P * P * sizeof(half));
-    pipe_->InitBuffer(bufW32imNegL1_, P * P * sizeof(half));
-    pipe_->InitBuffer(bufW64reL1_,    Q * Q * sizeof(half));
-    pipe_->InitBuffer(bufW64imL1_,    Q * Q * sizeof(half));
-    pipe_->InitBuffer(bufW64imNegL1_, Q * Q * sizeof(half));
+    // 持久 L1 + W_im 取负副本
+    pipe_->InitBuffer(bufW32reL1_,    P * P * sizeof(half));         // 2 KB
+    pipe_->InitBuffer(bufW32imL1_,    P * P * sizeof(half));         // 2 KB
+    pipe_->InitBuffer(bufW32imNegL1_, P * P * sizeof(half));         // 2 KB (新增)
+    pipe_->InitBuffer(bufW64reL1_,    Q * Q * sizeof(half));         // 8 KB
+    pipe_->InitBuffer(bufW64imL1_,    Q * Q * sizeof(half));         // 8 KB
+    pipe_->InitBuffer(bufW64imNegL1_, Q * Q * sizeof(half));         // 8 KB (新增)
 #ifdef OFDM_DEMOD_BATCH
-    pipe_->InitBuffer(bufXReL1_, BATCH_X_ELEMS * sizeof(half));
-    pipe_->InitBuffer(bufXImL1_, BATCH_X_ELEMS * sizeof(half));
-    pipe_->InitBuffer(bufTwReL1_, BATCH_X_ELEMS * sizeof(half));
-    pipe_->InitBuffer(bufTwImL1_, BATCH_X_ELEMS * sizeof(half));
+    pipe_->InitBuffer(bufXReL1_, BATCH_X_ELEMS * sizeof(half));      // 16 KB
+    pipe_->InitBuffer(bufXImL1_, BATCH_X_ELEMS * sizeof(half));      // 16 KB
+    pipe_->InitBuffer(bufTwReL1_, BATCH_X_ELEMS * sizeof(half));     // 16 KB
+    pipe_->InitBuffer(bufTwImL1_, BATCH_X_ELEMS * sizeof(half));     // 16 KB
 #endif
-    pipe_->InitBuffer(bufW32L0A_, 3 * P * P * sizeof(half));
-    pipe_->InitBuffer(bufW64L0B_, 3 * Q * Q * sizeof(half));
+    pipe_->InitBuffer(bufW32L0A_, 3 * P * P * sizeof(half));         // 6 KB
+    pipe_->InitBuffer(bufW64L0B_, 3 * Q * Q * sizeof(half));         // 24 KB
 }
 
 
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════════
 
 __aicore__ inline void OfdmDemod::CopyNd2Nz(
     const LocalTensor<half> &dst, const GlobalTensor<half> &src,
@@ -293,15 +293,15 @@ __aicore__ inline void OfdmDemod::NzToNdAndCast(
     }
     PipeBarrier<PIPE_V>();
     Cast(dst, tmp, RoundMode::CAST_NONE, m * Q);
-
-
-
+    // ★ X1 优化: 删原来 Cast 后的 PipeBarrier<PIPE_V>,
+    //    调用者 (Phase 1/3 sym 循环) 在下一步 RunCubeXX_Fused 前/末尾
+    //    已有兜底 PIPE_V/PIPE_ALL barrier, 此处重复.
 }
 
 
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Phase 0: CP removal + de-interleave
+// ═══════════════════════════════════════════════════════════════
 __attribute__((noinline)) __aicore__ void OfdmDemod::LoadSymbol(uint32_t s, uint32_t sym)
 {
     auto xi16      = bufXi16_.Get<int16_t>();
@@ -337,8 +337,8 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::LoadSymbol(uint32_t s, uint
 #ifdef OFDM_DEMOD_BATCH
     auto xReL1 = bufXReL1_.Get<half>();
     auto xImL1 = bufXImL1_.Get<half>();
-
-
+    // Pack four [32,16] panels directly into the B1 layout consumed by
+    // Phase 1, eliminating both GM scratch planes and the GM→B1 copy.
     for (uint16_t ns = 0; ns < N_SPLITS; ++ns) {
         const uint32_t panelOff = s * TILE_PQ + ns * K_PHASE1 * N_SUB;
         DataCopy(xReL1[panelOff], xre[ns * N_SUB],
@@ -366,11 +366,11 @@ __aicore__ inline void OfdmDemod::Phase0_CopyIn()
 }
 
 
-
-
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Phase 1: DFT-32 — X1 = W32 @ X (fused Mmad)
+//  X1_re = W_re·X_re + (-W_im)·X_im
+//  X1_im = W_re·X_im + W_im·X_re
+// ═══════════════════════════════════════════════════════════════
 
 __aicore__ inline void OfdmDemod::RunCubeP1_ComplexTileReuse(
     const LocalTensor<half> &wReL0,
@@ -391,7 +391,7 @@ __aicore__ inline void OfdmDemod::RunCubeP1_ComplexTileReuse(
         MmadParams mp;
         mp.m = M_MMAD; mp.n = N_SUB; mp.k = K_PHASE1;
 
-
+        // 同一 Xre tile 同时用于 Yre=Wre*Xre 与 Yim=Wim*Xre。
         LocalTensor<half> b1Re = qB1_.AllocTensor<half>();
         DataCopy(b1Re, xReGm[bOff], { K_PHASE1, 1, uint16_t(Q / 16 - 1), 0 });
         qB1_.EnQue(b1Re);
@@ -407,7 +407,7 @@ __aicore__ inline void OfdmDemod::RunCubeP1_ComplexTileReuse(
         Mmad(coIm, wImL0, b2Re, mp);
         qB2_.FreeTensor(b2Re);
 
-
+        // 同一 Xim tile 同时用于 Yre=(-Wim)*Xim 与 Yim=Wre*Xim。
         LocalTensor<half> b1Im = qB1_.AllocTensor<half>();
         DataCopy(b1Im, xImGm[bOff], { K_PHASE1, 1, uint16_t(Q / 16 - 1), 0 });
         qB1_.EnQue(b1Im);
@@ -500,34 +500,34 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase1_Dft32()
     CopyNd2Nz(w32ImL1, w32ImG_, M_MMAD, K_PHASE1);
     PipeBarrier<PIPE_ALL>();
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    // ⚠️ Muls 是 Vector 操作, 不能直接对 L1 操作!
+    // L1 不是 Vector 工作区, Muls 输入要求 UB.
+    // 解决方案: 先 L1 → UB → Muls 取负 → UB → L1
+    // 但这样代价高. 改成在 GM 端预生成? 太麻烦.
+    //
+    // 正确方法: 直接对 W_im 在 L1 中做取负? 不行, Muls 操作不了 L1.
+    //
+    // 折中: 把 W_im 取负后存到 GM scratch, 然后 CopyNd2Nz 加载?
+    // 太复杂. 改用第二个方案:
+    //
+    // 方案 B: W_im 不取负, 第二个 Mmad 用 -1 的 Muls 后再 Mmad? 也不对.
+    //
+    // 方案 C: 让 host 端生成 W_im_neg.bin, kernel 直接加载.
+    // 这个最干净, 但要改 ref.py 和 main.cpp.
+    //
+    // 当前实现: 我们在 UB 里准备 W_im_neg, 然后 CopyNd2Nz 到 L1.
+    // 但这需要 UB 中转 + 额外 P*P + Q*Q half 空间.
+    //
+    // 最简洁 — 直接拿 w32ImL1, 走 UB 中转一次:
     {
-        auto tmpUB = bufTmp_.Get<half>();
-
+        auto tmpUB = bufTmp_.Get<half>();   // 复用 tmp buffer (4 KB > P*P*2B=2KB)
+        // 拷 L1 → UB
         DataCopy(tmpUB, w32ImL1, P * P);
         PipeBarrier<PIPE_ALL>();
-
+        // UB 内取负
         Muls(tmpUB, tmpUB, (half)-1.0, P * P);
         PipeBarrier<PIPE_V>();
-
+        // UB → L1 (NZ 格式不变, 直接 DataCopy)
         event_t e = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
         SetFlag<HardEvent::V_MTE3>(e); WaitFlag<HardEvent::V_MTE3>(e);
         DataCopy(w32ImNegL1, tmpUB, P * P);
@@ -537,8 +537,8 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase1_Dft32()
     }
 #endif
 
-
-
+    // L1 constants persist across batch items. Reload L0 per tile because the
+    // later qA2 activity may invalidate L0A residency.
     LoadL1ToL0A(w32ReL0,    w32ReL1,    M_MMAD / 16, K_PHASE1 / 16);
     LoadL1ToL0A(w32ImL0,    w32ImL1,    M_MMAD / 16, K_PHASE1 / 16);
     LoadL1ToL0A(w32ImNegL0, w32ImNegL1, M_MMAD / 16, K_PHASE1 / 16);
@@ -577,9 +577,9 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase1_Dft32()
 }
 
 
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Phase 2: Twiddle — Tw = X1 ⊙ twiddle
+// ═══════════════════════════════════════════════════════════════
 __attribute__((noinline)) __aicore__ void OfdmDemod::Phase2_Twiddle()
 {
     auto tmp       = bufTmp_.Get<half>();
@@ -596,7 +596,7 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase2_Twiddle()
     const uint16_t m = validSymbols * P;
 #endif
 
-
+    // Twiddle 常驻 UB；batch 内所有 tile 共享同一份系数。
 #ifdef OFDM_DEMOD_BATCH
     if (batchIdx_ == 0) {
 #endif
@@ -621,8 +621,8 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase2_Twiddle()
         event_t e1 = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::V_MTE3));
         SetFlag<HardEvent::V_MTE3>(e1); WaitFlag<HardEvent::V_MTE3>(e1);
 #ifdef OFDM_DEMOD_BATCH
-
-
+        // A1 NZ layout for one fused [m,64] matrix: K panels outermost,
+        // followed by the 32 rows belonging to this symbol.
         for (uint16_t ns = 0; ns < N_SPLITS; ++ns) {
             const uint32_t panelOff = ns * N_SUB * m + s * P * N_SUB;
             DataCopy(twReL1[panelOff], tmp[ns * N_SUB],
@@ -651,17 +651,17 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase2_Twiddle()
         event_t e4 = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE3_V));
         SetFlag<HardEvent::MTE3_V>(e4); WaitFlag<HardEvent::MTE3_V>(e4);
     }
-
+    // Phase 3 读取前只需本地 MTE3→MTE2 依赖。
     event_t eScratch = static_cast<event_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE3_MTE2));
     SetFlag<HardEvent::MTE3_MTE2>(eScratch); WaitFlag<HardEvent::MTE3_MTE2>(eScratch);
 }
 
 
-
-
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Phase 3: DFT-64 — Y = Tw @ W64^T (fused Mmad)
+//  Y_re = Tw_re·W64re + Tw_im·(-W64im)
+//  Y_im = Tw_re·W64im + Tw_im·W64re
+// ═══════════════════════════════════════════════════════════════
 
 #ifdef OFDM_DEMOD_BATCH
 __aicore__ inline void OfdmDemod::RunCubeP3_L1Batch(
@@ -672,8 +672,8 @@ __aicore__ inline void OfdmDemod::RunCubeP3_L1Batch(
     constexpr uint16_t kBlocks = K_PHASE3 / 16;
     const uint16_t mBlocks = m / 16;
 
-
-
+    // The twiddle outputs already reside in packed A1 layout. Load each
+    // complex operand once for all four N=16 sub-cubes.
     LocalTensor<half> a2_1 = qA2_.AllocTensor<half>();
     LocalTensor<half> a2_2 = qA2_.AllocTensor<half>();
     LoadL1ToL0A(a2_1, a1L1, mBlocks, kBlocks);
@@ -715,7 +715,7 @@ __aicore__ inline void OfdmDemod::RunCubeP3_Batch(
     constexpr uint16_t kBlocks = K_PHASE3 / 16;
     const uint16_t mBlocks = m / 16;
 
-
+    // 把同核最多 4 个 [32,64] symbol 沿 M 合并；每个操作数只搬一次。
     LocalTensor<half> a1_1 = qA1_.AllocTensor<half>();
     LocalTensor<half> a1_2 = qA1_.AllocTensor<half>();
     for (uint16_t i = 0; i < kBlocks; ++i) {
@@ -775,9 +775,9 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase3_Dft64()
         CopyNd2Nz(w64ImL1, w64ImG_T_, K_PHASE3, Q);
         PipeBarrier<PIPE_ALL>();
 
-
+    // W64_im 取负副本 (UB 中转)
     {
-
+        // bufTmp_ 只有 4 KB；借用 Phase 3 输出前尚空闲的 16 KB buffer。
         auto bigTmp = bufX1re_.Get<half>();
         DataCopy(bigTmp, w64ImL1, Q * Q);
         PipeBarrier<PIPE_ALL>();
@@ -792,7 +792,7 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase3_Dft64()
     }
 #endif
 
-
+    // Keep GM→L1 and negation persistent, but reload L0B after Phase 1 qB2 use.
     LoadData2DParams loadP;
     loadP.repeatTimes = K_PHASE3 / 16;
     loadP.srcStride = 1;
@@ -815,8 +815,8 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase3_Dft64()
     auto yreBatch = bufX1re_.Get<half>();
     auto yimBatch = bufX1im_.Get<half>();
 
-
-
+    // Fuse all symbols assigned to this core along M, exactly as mod_batch's
+    // inverse Phase A. L1 inputs eliminate the GM→L1 leg entirely.
     RunCubeP3_L1Batch(twReL1, w64ReL0, twImL1, w64ImNegL0, cubeAcc, m);
     PipeBarrier<PIPE_V>();
     NzToNdAndCast(yreBatch, cubeAcc, cubeNd, m);
@@ -834,7 +834,7 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase3_Dft64()
     uint16_t m = validSymbols * P;
     uint32_t outOff = sym_start_ * N_FFT;
 
-
+    // [validSymbols,32,64] 合并为一次 [M,64]×[64,64]，M=128/64。
     auto yreBatch = bufX1re_.Get<half>();
     RunCubeP3_Batch(TwReScr_, w64ReL0, TwImScr_, w64ImNegL0, cubeAcc, m);
     PipeBarrier<PIPE_V>();
@@ -856,9 +856,9 @@ __attribute__((noinline)) __aicore__ void OfdmDemod::Phase3_Dft64()
 }
 
 
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Process
+// ═══════════════════════════════════════════════════════════════
 __aicore__ inline void OfdmDemod::Process()
 {
 #ifdef OFDM_DEMOD_BATCH
@@ -867,8 +867,8 @@ __aicore__ inline void OfdmDemod::Process()
     for (uint32_t tile = blockId_; tile < totalTiles; tile += BLOCK_DIM) {
         batchIdx_  = tile / TILES_PER_BATCH;
         sym_start_ = (tile % TILES_PER_BATCH) * SYMBOLS_PER_CORE;
-
-
+        // Each core owns its complete tile; phase hand-offs stay in local L1,
+        // so no cross-core barrier is required.
         Phase0_CopyIn();
         Phase1_Dft32();
         Phase2_Twiddle();
@@ -883,9 +883,9 @@ __aicore__ inline void OfdmDemod::Process()
 }
 
 
-
-
-
+// ═══════════════════════════════════════════════════════════════
+//  Kernel entry
+// ═══════════════════════════════════════════════════════════════
 extern "C" __global__ __aicore__ void ofdm_demod_batch_kernel(
     GM_ADDR input_gm,
     GM_ADDR w32_re_gm,    GM_ADDR w32_im_gm,

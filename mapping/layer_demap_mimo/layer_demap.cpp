@@ -60,7 +60,7 @@ Status ValidateConfig(const PuschMimoConfig &config)
     return OK;
 }
 
-}
+}  // namespace
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            PuschMimoLayout *layout,
@@ -95,8 +95,8 @@ Status BuildCurrentProfile(const PuschMimoConfig &config,
     metadata->gather_index_elems = config.num_layers * GATHER_CHUNK;
 
     std::fill(gather_index, gather_index + MAX_INDEX_ELEMS, uint32_t{0});
-
-
+    // Each UB source group is [L,GROUP_DATA_RE]. Gather a 128-RE window to
+    // symbol-major [re,L]; passing source[chunk_base] selects each window.
     for (uint32_t symbol = 0; symbol < GATHER_CHUNK; ++symbol) {
         for (uint32_t layer = 0; layer < config.num_layers; ++layer) {
             gather_index[symbol * config.num_layers + layer] =
@@ -156,4 +156,4 @@ Status ReferenceDemap(const int16_t *layer_llr,
     return OK;
 }
 
-}
+}  // namespace airan::layer_demap

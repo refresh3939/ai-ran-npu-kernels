@@ -6,8 +6,8 @@
 
 namespace airan {
 
-
-
+// Physical ABI shared with rx/mimo_detect_io_pack.  These are storage
+// dimensions, not the number of active spatial layers.
 constexpr uint32_t MIMO_IO_ABI_VERSION = 1;
 #ifndef MIMO_IO_NR_VALUE
 #define MIMO_IO_NR_VALUE 64
@@ -47,16 +47,16 @@ constexpr size_t MimoIoOutputElements()
     return static_cast<size_t>(MIMO_IO_PHYSICAL_LAYERS) * MIMO_IO_RE;
 }
 
-
-
+// Validates the selected io_pack -> detector profile and the BRI convergence
+// constraints.  On failure, reason contains a host-facing diagnostic.
 bool ValidateMimoDetectBriHostContract(
     const MimoDetectBriHostContract &contract, std::string *reason);
 
-
-
-
-
-
+// Validates the actual fp16 buffers before launching the kernel:
+//   hrm_*   [23296,NR,16], inactive columns [active_layers,16) == 0
+//   yvpad_* [23296,NR,16], all 16 columns repeat the same y sample
+//   no      [23296], finite and non-negative
+// The length arguments are element counts, not byte counts.
 bool ValidateMimoDetectBriPhysicalInputs(
     const MimoDetectBriHostContract &contract,
     const uint16_t *hrm_re, size_t hrm_re_elements,
@@ -66,4 +66,4 @@ bool ValidateMimoDetectBriPhysicalInputs(
     const uint16_t *noise, size_t noise_elements,
     std::string *reason);
 
-}
+}  // namespace airan

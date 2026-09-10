@@ -16,13 +16,21 @@ from pathlib import Path
 from typing import Any
 
 
-MAX_ANTENNAS = 64
-MAX_LAYERS = 16
+MAX_TX_ANTENNAS = 16
+MAX_RX_ANTENNAS = 64
+MAX_PUSCH_LAYERS = 4
+MAX_LOGICAL_PORTS = 4
+# Backward-compatible public name used by receiver bucket helpers.
+MAX_ANTENNAS = MAX_RX_ANTENNAS
+# Public/profile capacity is the standard single-PUSCH Rank limit.  The BRI
+# implementation currently pads that axis to a 16-column Cube storage tile.
+MAX_LAYERS = MAX_PUSCH_LAYERS
+MAX_STORAGE_LAYERS = 16
 VALID_QM = {2, 4, 6, 8}
 VALID_ARCHITECTURES = {"full_digital", "hybrid", "analog"}
 VALID_PRECODING = {"bypass", "codebook", "non_codebook"}
 PROFILE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
-RUNTIME_CONFIG_FORMAT = "<HHI32s" + "H" * 44 + "ff" + "I" * 14
+RUNTIME_CONFIG_FORMAT = "<HHI32s" + "H" * 44 + "ff" + "I" * 4 + "H" * 10 + "I" * 5
 RUNTIME_CONFIG_SIZE = struct.calcsize(RUNTIME_CONFIG_FORMAT)
 assert RUNTIME_CONFIG_SIZE == 192
 ARCHITECTURE_ID = {"full_digital": 1, "hybrid": 2, "analog": 3}
@@ -49,11 +57,18 @@ class ResolvedPlan:
         dmrs = value["dmrs"]
         channel = value["channel"]
         receiver = value["receiver"]
+        scheduler = value.get("scheduler", {
+            "slot_number": 0, "dmrs_scrambling_id": 0,
+            "data_scrambling_id": 0, "rnti": 1, "start_symbol": 0,
+            "num_allocated_symbols": waveform["num_symbols"],
+            "dmrs_additional_position": 0, "mapping_type": 0,
+            "codeword_index": 0, "n_scid": 0,
+        })
         digest = bytes.fromhex(value["source"]["sha256"])
         ports = list(dmrs["ports"])
-        if len(ports) > MAX_LAYERS:
+        if len(ports) > MAX_STORAGE_LAYERS:
             raise ProfileError("resolved DMRS port count exceeds runtime ABI capacity")
-        ports.extend([0] * (MAX_LAYERS - len(ports)))
+        ports.extend([0] * (MAX_STORAGE_LAYERS - len(ports)))
         flags = 1
         if receiver["adapter_required"]:
             flags |= 2
@@ -69,7 +84,8 @@ class ResolvedPlan:
             waveform["used_subcarriers"], waveform["padded_subcarriers"],
             waveform["num_dmrs_symbols"], dmrs["symbol_mask"], len(dmrs["ports"]),
             *ports,
-            dmrs["type"], dmrs["length"], dmrs["num_cdm_groups_without_data"], 0,
+            dmrs["type"], dmrs["length"], dmrs["num_cdm_groups_without_data"],
+            scheduler["n_scid"],
             PRECODING_ID[spatial["precoding"]["mode"]],
             spatial["precoding"]["tpmi"], spatial["precoding"]["prg_size_rb"],
         ]
@@ -77,11 +93,15 @@ class ResolvedPlan:
             raise AssertionError("runtime ABI halfword field count changed")
         return struct.pack(
             RUNTIME_CONFIG_FORMAT,
-            1, RUNTIME_CONFIG_SIZE, flags, digest, *halfwords,
+            2, RUNTIME_CONFIG_SIZE, flags, digest, *halfwords,
             channel["gain"], channel["awgn_std_int16"],
             waveform["data_re_per_layer"], waveform["data_stride_per_layer"],
             waveform["qam_row_stride"], waveform["grid_re_per_port"],
-            *([0] * 10),
+            scheduler["slot_number"], scheduler["dmrs_scrambling_id"],
+            scheduler["data_scrambling_id"], scheduler["rnti"],
+            scheduler["start_symbol"], scheduler["num_allocated_symbols"],
+            scheduler["dmrs_additional_position"], scheduler["mapping_type"],
+            scheduler["codeword_index"], 0, *([0] * 5),
         )
 
 
@@ -280,13 +300,13 @@ def evaluate_capabilities(plan: ResolvedPlan, path: Path) -> ResolvedPlan:
         rx_bucket = _integer(runtime["rx_bucket"],
                              f"{where}.runtime.rx_bucket", 1, MAX_ANTENNAS)
         layer_bucket = _integer(runtime["layer_bucket"],
-                                f"{where}.runtime.layer_bucket", 1, MAX_LAYERS)
+                                f"{where}.runtime.layer_bucket", 1,
+                                MAX_STORAGE_LAYERS)
         if (rx_bucket < value["topology"]["rx_antennas"] or
                 rx_bucket > value["receiver"]["max_rx_antennas"]):
             failures.append("runtime.rx_bucket is outside active/capacity bounds")
-        if (layer_bucket < value["active"]["rank"] or
-                layer_bucket > value["receiver"]["max_layers"]):
-            failures.append("runtime.layer_bucket is outside active/capacity bounds")
+        if layer_bucket < value["active"]["rank"]:
+            failures.append("runtime.layer_bucket is below the active PUSCH Rank")
         build = _object(variant["build"], f"{where}.build")
         _keys(build, f"{where}.build", {
             "ce_nr", "ce_nl_source", "ce_retained_rank", "ce_block_dim",
@@ -312,9 +332,11 @@ def evaluate_capabilities(plan: ResolvedPlan, path: Path) -> ResolvedPlan:
         detector_rx = _integer(build["detector_rx_capacity"],
                                f"{where}.build.detector_rx_capacity", 1, MAX_ANTENNAS)
         detector_layers = _integer(build["detector_layer_capacity"],
-                                   f"{where}.build.detector_layer_capacity", 1, MAX_LAYERS)
+                                   f"{where}.build.detector_layer_capacity", 1,
+                                   MAX_STORAGE_LAYERS)
         detector_bri_block = _integer(build["detector_bri_block"],
-                                      f"{where}.build.detector_bri_block", 1, MAX_LAYERS)
+                                      f"{where}.build.detector_bri_block", 1,
+                                      MAX_STORAGE_LAYERS)
         if ce_nr != rx_bucket or detector_rx != rx_bucket:
             failures.append("build RX capacities do not match runtime.rx_bucket")
         if detector_layers != layer_bucket:
@@ -445,10 +467,10 @@ def compile_profile(path: Path, rank: int) -> ResolvedPlan:
     architecture = _string(topology["architecture"], "profile.topology.architecture")
     if architecture not in VALID_ARCHITECTURES:
         raise ProfileError(f"unsupported topology architecture {architecture!r}")
-    tx_antennas = _integer(topology["tx_antennas"], "profile.topology.tx_antennas", 1, MAX_ANTENNAS)
-    tx_rf = _integer(topology["tx_rf_chains"], "profile.topology.tx_rf_chains", 1, MAX_ANTENNAS)
-    rx_antennas = _integer(topology["rx_antennas"], "profile.topology.rx_antennas", 1, MAX_ANTENNAS)
-    rx_rf = _integer(topology["rx_rf_chains"], "profile.topology.rx_rf_chains", 1, MAX_ANTENNAS)
+    tx_antennas = _integer(topology["tx_antennas"], "profile.topology.tx_antennas", 1, MAX_TX_ANTENNAS)
+    tx_rf = _integer(topology["tx_rf_chains"], "profile.topology.tx_rf_chains", 1, MAX_TX_ANTENNAS)
+    rx_antennas = _integer(topology["rx_antennas"], "profile.topology.rx_antennas", 1, MAX_RX_ANTENNAS)
+    rx_rf = _integer(topology["rx_rf_chains"], "profile.topology.rx_rf_chains", 1, MAX_RX_ANTENNAS)
     if tx_rf > tx_antennas or rx_rf > rx_antennas:
         raise ProfileError("RF chain count cannot exceed physical antenna count")
     if architecture == "full_digital" and (tx_rf != tx_antennas or rx_rf != rx_antennas):
@@ -458,8 +480,8 @@ def compile_profile(path: Path, rank: int) -> ResolvedPlan:
     _keys(spatial, "profile.spatial", {"supported_ranks", "port_policy", "precoding"},
           {"antenna_mapping"})
     ranks = _strict_increasing(spatial["supported_ranks"],
-                               "profile.spatial.supported_ranks", 1, MAX_LAYERS)
-    rank = _integer(rank, "requested_rank", 1, MAX_LAYERS)
+                               "profile.spatial.supported_ranks", 1, MAX_PUSCH_LAYERS)
+    rank = _integer(rank, "requested_rank", 1, MAX_PUSCH_LAYERS)
     if rank not in ranks:
         raise ProfileError(f"Rank{rank} is not supported by profile {name}")
     if rank > min(tx_rf, rx_rf):
@@ -476,7 +498,7 @@ def compile_profile(path: Path, rank: int) -> ResolvedPlan:
     elif port_mode == "explicit":
         ports_by_rank = _rank_map(
             port_policy.get("ports_by_rank"), "profile.spatial.port_policy.ports_by_rank",
-            ranks, lambda value, where: _integer(value, where, 1, MAX_ANTENNAS))
+            ranks, lambda value, where: _integer(value, where, 1, MAX_LOGICAL_PORTS))
     else:
         raise ProfileError("profile.spatial.port_policy.mode must be identity or explicit")
     for item, ports in ports_by_rank.items():
@@ -668,7 +690,10 @@ def compile_profile(path: Path, rank: int) -> ResolvedPlan:
         "validation": {
             "configuration_valid": True,
             "execution_eligibility": "not_evaluated_until_capability_registry",
-            "limits": {"max_antennas": MAX_ANTENNAS, "max_layers": MAX_LAYERS},
+            "limits": {"max_tx_antennas": MAX_TX_ANTENNAS,
+                       "max_rx_antennas": MAX_RX_ANTENNAS,
+                       "max_pusch_layers": MAX_PUSCH_LAYERS,
+                       "max_internal_storage_layers": MAX_STORAGE_LAYERS},
         },
     }
     return ResolvedPlan(plan)

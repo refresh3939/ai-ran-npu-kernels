@@ -276,7 +276,7 @@ void RunCase(aclrtStream stream, uint16_t layers, uint32_t num_slots,
                 num_slots, layout.codeword_stride, C_NUM, LDPC_N, latency_us);
 }
 
-}
+}  // namespace
 
 int main()
 {

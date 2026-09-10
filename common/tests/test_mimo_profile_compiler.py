@@ -12,8 +12,7 @@ COMMON = Path(__file__).resolve().parents[1]
 KERNELS = COMMON.parent
 sys.path.insert(0, str(COMMON))
 
-from mimo_profile_compiler import (ProfileError, ResolvedPlan, compile_profile,
-                                   evaluate_capabilities)
+from mimo_profile_compiler import ProfileError, compile_profile, evaluate_capabilities
 
 
 PROFILE = COMMON / "profiles/fd8x8_rank1_4.json"
@@ -34,8 +33,9 @@ def expect_error(document: dict, message: str) -> None:
 def main() -> None:
     schema = json.loads((COMMON / "mimo_profile.schema.json").read_text())
     assert schema["$schema"].endswith("2020-12/schema")
-    assert schema["properties"]["topology"]["properties"]["tx_antennas"]["maximum"] == 64
-    assert schema["properties"]["spatial"]["properties"]["supported_ranks"]["items"]["maximum"] == 16
+    assert schema["properties"]["topology"]["properties"]["tx_antennas"]["maximum"] == 16
+    assert schema["properties"]["spatial"]["properties"]["supported_ranks"]["items"]["maximum"] == 4
+    assert schema["properties"]["receiver"]["properties"]["capacity"]["properties"]["max_layers"]["maximum"] == 4
 
     expected_ports = {1: 1, 2: 2, 3: 4, 4: 4}
     expected_gains = {1: 0.32, 2: 0.32, 3: 0.5, 4: 0.32}
@@ -60,13 +60,14 @@ def main() -> None:
         receiver = evaluated.value["receiver"]
         assert receiver["requested_rx_bucket"] == 8
         assert receiver["requested_layer_bucket"] in (1, 2, 4)
+        assert receiver["max_layers"] == 4
         expected_execution_rx = 16 if rank == 4 else 64
         assert receiver["rx_bucket"] == expected_execution_rx
         assert receiver["layer_bucket"] == 16
         assert receiver["ce_shape"] == [expected_execution_rx, 16, 14, 1664]
         dispatch = evaluated.value["dispatch"]
-        expected_variant = ("rx16_layer16_rank4" if rank == 4
-                            else "rx64_layer16_rank1_4")
+        expected_variant = ("rx16_storage16_rank4" if rank == 4
+                            else "rx64_storage16_rank1_4")
         assert dispatch["name"] == expected_variant
         assert dispatch["build"]["ce_nr"] == expected_execution_rx
         assert dispatch["build"]["ce_retained_rank"] == 96
@@ -74,7 +75,7 @@ def main() -> None:
                    for check in evaluated.value["validation"]["operator_checks"])
         binary = evaluated.to_runtime_config()
         assert len(binary) == 192
-        assert binary[:4] == b"\x01\x00\xc0\x00"
+        assert binary[:4] == b"\x02\x00\xc0\x00"
         assert int.from_bytes(binary[4:8], "little") == 3
         assert int.from_bytes(binary[54:56], "little") == expected_execution_rx
         assert int.from_bytes(binary[56:58], "little") == 16
@@ -84,8 +85,8 @@ def main() -> None:
 
     base = json.loads(PROFILE.read_text())
     invalid = copy.deepcopy(base)
-    invalid["topology"]["tx_antennas"] = 65
-    expect_error(invalid, "TX>64 must fail")
+    invalid["topology"]["tx_antennas"] = 17
+    expect_error(invalid, "TX>16 must fail")
     invalid = copy.deepcopy(base)
     invalid["topology"]["rx_rf_chains"] = 4
     expect_error(invalid, "full digital RF mismatch must fail")
@@ -96,18 +97,20 @@ def main() -> None:
     invalid["receiver"]["buckets"]["rx_antennas"] = [1, 2, 4]
     expect_error(invalid, "missing fitting RX bucket must fail")
     invalid = copy.deepcopy(base)
+    invalid["receiver"]["capacity"]["max_layers"] = 16
+    invalid["receiver"]["buckets"]["layers"] = [1, 2, 4, 8, 16]
+    expect_error(invalid, "profile receiver capacity above standard Rank4 must fail")
+    invalid = copy.deepcopy(base)
     invalid["waveform"]["used_subcarriers"] = 1595
     expect_error(invalid, "non-RB-aligned subcarrier count must fail")
 
-    # The authoring model and planner must cover the requested upper boundary
-    # even though current NPU execution eligibility is deliberately evaluated
-    # only in the later capability-registry stage.
+    # A standard single NR PUSCH profile cannot be promoted to Rank16.
     wide = copy.deepcopy(base)
-    wide["profile_name"] = "fd64x64_rank16_contract"
+    wide["profile_name"] = "fd16x64_rank16_contract"
     wide["topology"] = {
         "architecture": "full_digital",
-        "tx_antennas": 64,
-        "tx_rf_chains": 64,
+        "tx_antennas": 16,
+        "tx_rf_chains": 16,
         "rx_antennas": 64,
         "rx_rf_chains": 64,
     }
@@ -116,26 +119,14 @@ def main() -> None:
     wide["spatial"]["precoding"] = {"default_mode": "bypass"}
     wide["dmrs"]["ports_by_rank"] = {"16": list(range(1000, 1016))}
     wide["channel"]["gain_by_rank"] = {"16": 0.16}
-    with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / "wide.json"
-        path.write_text(json.dumps(wide), encoding="utf-8")
-        plan = compile_profile(path, 16).value
-    assert plan["active"] == {"rank": 16, "logical_tx_ports": 16}
-    assert plan["topology"]["tx_antennas"] == 64
-    assert plan["topology"]["rx_antennas"] == 64
-    assert plan["receiver"]["rx_bucket"] == 64
-    assert plan["receiver"]["layer_bucket"] == 16
-    assert plan["receiver"]["ce_shape"] == [64, 16, 14, 1664]
-    assert plan["validation"]["execution_eligibility"] == (
-        "not_evaluated_until_capability_registry")
-    evaluated = evaluate_capabilities(ResolvedPlan(plan), CAPABILITIES)
-    assert evaluated.value["validation"]["execution_eligibility"] == "ineligible"
-    blockers = evaluated.value["validation"]["blocking_operators"]
-    assert "execution_variant" in blockers
-    assert "host_full_digital_channel_8x8" in blockers
-    assert "layer_map_mimo" in blockers
-    assert "mimo_detect_bri_batch" in blockers
-    print("[PASS] common MIMO profile compiler, capability registry, 64x64/Rank16 report, and fail-closed cases")
+    expect_error(wide, "single-PUSCH Rank16 must fail")
+    scalable = COMMON / "profiles/fd16x64_rank1_4.json"
+    for rank in range(1, 5):
+        evaluated = evaluate_capabilities(compile_profile(scalable, rank), CAPABILITIES)
+        assert evaluated.value["validation"]["execution_eligibility"] == "eligible"
+        assert evaluated.value["topology"]["tx_antennas"] == 16
+        assert evaluated.value["topology"]["rx_antennas"] == 64
+    print("[PASS] common MIMO profile compiler, 16TX/64RX Rank1-4 execution, standard Rank limit, and fail-closed cases")
 
 
 if __name__ == "__main__":

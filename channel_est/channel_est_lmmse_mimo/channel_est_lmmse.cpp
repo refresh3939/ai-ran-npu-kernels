@@ -70,7 +70,7 @@ uint32_t SharingCount(const PuschMimoConfig &config, uint32_t layer)
     return sharing;
 }
 
-}
+}  // namespace
 
 uint64_t PilotScHash(const uint16_t *pilot_sc, uint32_t count)
 {
@@ -178,4 +178,4 @@ Status ValidateOpArgs(const ChannelEstLmmseOpArgsV1 &args)
                                     args.pilot_sc_host, *args.weight_model);
 }
 
-}
+}  // namespace airan::channel_est_lmmse

@@ -119,7 +119,7 @@ bool CheckCase(const Case &test)
     return ok;
 }
 
-}
+}  // namespace
 
 int main()
 {

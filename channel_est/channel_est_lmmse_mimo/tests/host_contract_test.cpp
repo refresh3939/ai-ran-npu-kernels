@@ -66,7 +66,7 @@ bool Expect(Status actual, Status expected, const char *name)
     return pass;
 }
 
-}
+}  // namespace
 
 int main()
 {

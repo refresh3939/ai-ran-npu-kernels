@@ -17,7 +17,7 @@ matrix = json.loads((CHAIN_DIR / "contract_matrix.json").read_text(encoding="utf
 schema_findings = harness.validate_schema(matrix)
 assert not schema_findings, schema_findings
 assert matrix["claim"] == "fused_single_context_tx_rank1_to_rank4_and_staged_coded_e2e_verified"
-assert len(matrix["edges"]) == 9
+assert len(matrix["edges"]) == 10
 assert matrix["stage_order"][0] == "ldpc_encode"
 assert matrix["stage_order"][-1] == "ofdm_mod_batch"
 assert matrix["cross_chain_dmrs_contract"]["rx_pilot_count_per_layer"] == [399, 399, 399, 399]

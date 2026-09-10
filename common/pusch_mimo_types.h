@@ -1,10 +1,10 @@
-
-
-
-
-
-
-
+/**
+ * @file pusch_mimo_types.h
+ * @brief Stable host-side ABI types shared by the PUSCH MIMO operators.
+ *
+ * Complex tensors use separate fp16 real/imaginary planes.  A grid is always
+ * flattened from [outer, symbol, subcarrier], with subcarrier contiguous.
+ */
 #pragma once
 
 #include <cstddef>
@@ -14,10 +14,17 @@
 namespace airan {
 
 constexpr uint16_t PUSCH_MIMO_ABI_VERSION = 1;
-constexpr uint16_t PUSCH_MIMO_RUNTIME_ABI_VERSION = 1;
-constexpr uint16_t PUSCH_MIMO_MAX_PHYSICAL_ANTENNAS = 64;
+constexpr uint16_t PUSCH_MIMO_RUNTIME_ABI_VERSION = 2;
+constexpr uint16_t PUSCH_MIMO_MAX_TX_ANTENNAS = 16;
+constexpr uint16_t PUSCH_MIMO_MAX_RX_ANTENNAS = 64;
+// Compatibility alias for receiver-capacity code written before TX/RX limits
+// were made asymmetric.
+constexpr uint16_t PUSCH_MIMO_MAX_PHYSICAL_ANTENNAS = PUSCH_MIMO_MAX_RX_ANTENNAS;
+constexpr uint16_t PUSCH_MIMO_MAX_PUSCH_LAYERS = 4;
+// Fixed BRI/Cube storage width. This is not an advertised PUSCH Rank.
 constexpr uint16_t PUSCH_MIMO_MAX_DETECT_LAYERS = 16;
 constexpr uint16_t PUSCH_MIMO_MAX_DMRS_PORTS = 16;
+// Preserved ABI array extent; the production standard chain accepts one entry.
 constexpr uint16_t PUSCH_MIMO_MAX_ALLOCATIONS = 16;
 
 enum class MimoArchitecture : uint16_t {
@@ -78,7 +85,7 @@ struct PuschMimoConfig {
     uint32_t reserved[8];
 };
 
-
+/** One scheduled PUSCH's placement in the joint detector layer axis. */
 struct MimoDetectAllocation {
     uint16_t pusch_index;
     uint16_t layer_offset;
@@ -86,10 +93,10 @@ struct MimoDetectAllocation {
     uint16_t num_tx_ports;
 };
 
-
-
-
-
+/** Stable host plan. Production v1 uses allocations[0] only; the wider array
+ * preserves the already-published binary ABI. layer_capacity may be the
+ * detector's padded storage width while total_layers remains Rank 1..4.
+ */
 struct MimoDetectLayerPlan {
     uint16_t abi_version;
     uint16_t struct_size;
@@ -110,14 +117,15 @@ struct PuschMimoLayout {
     uint32_t codeword_stride;
 };
 
-
-
-
-
-
-
-
-
+/**
+ * Versioned host runtime plan compiled from a static radio profile and one
+ * dynamic PUSCH grant.
+ *
+ * This is additive and does not change PuschMimoConfig ABI v1. Operators can
+ * migrate one at a time, then derive their existing operator-specific config
+ * and tiling data from this common plan. The byte layout is fixed at 192 bytes
+ * and is shared with mimo_config_compiler.py/mimo_profile_compiler.py.
+ */
 struct PuschMimoRuntimeConfig {
     uint16_t abi_version;
     uint16_t struct_size;
@@ -163,7 +171,20 @@ struct PuschMimoRuntimeConfig {
     uint32_t data_stride_per_layer;
     uint32_t qam_row_stride;
     uint32_t grid_re_per_port;
-    uint32_t reserved[10];
+
+    // Dynamic scheduler grant. Added in runtime ABI v2 by consuming bytes that
+    // were reserved in v1; all preceding field offsets remain unchanged.
+    uint16_t slot_number;
+    uint16_t dmrs_scrambling_id;
+    uint16_t data_scrambling_id;
+    uint16_t rnti;
+    uint16_t start_symbol;
+    uint16_t num_allocated_symbols;
+    uint16_t dmrs_additional_position;
+    uint16_t mapping_type;
+    uint16_t codeword_index;
+    uint16_t reserved16;
+    uint32_t reserved[5];
 };
 
 static_assert(std::is_standard_layout<PuschMimoConfig>::value,
@@ -192,5 +213,7 @@ static_assert(offsetof(PuschMimoRuntimeConfig, channel_gain) == 128,
               "PuschMimoRuntimeConfig channel offset changed");
 static_assert(offsetof(PuschMimoRuntimeConfig, data_re_per_layer) == 136,
               "PuschMimoRuntimeConfig geometry offset changed");
+static_assert(offsetof(PuschMimoRuntimeConfig, slot_number) == 152,
+              "PuschMimoRuntimeConfig scheduler offset changed");
 
-}
+}  // namespace airan

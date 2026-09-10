@@ -29,4 +29,4 @@ Status Enqueue(const MimoDetectIoPackOpArgsV1 &args,
     return launch_status == ACL_ERROR_NONE ? OK : LAUNCH_FAILED;
 }
 
-}
+}  // namespace airan::mimo_detect_io_pack

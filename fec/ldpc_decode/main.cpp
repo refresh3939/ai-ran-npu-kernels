@@ -1,16 +1,16 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
+// ============================================================================
+// main.cpp — LDPC decoder host launcher + verification + benchmark
+//
+// Loads one local SNR dataset, launches the kernel once for verification,
+// then re-launches it N_BENCH_RUNS times for latency measurement.
+//
+// Kernel outputs are dumped under AIRAN_OUTPUT_DIR for an independent check by
+// scripts/verify_result.py. The hard bits are checked against info_bits.bin;
+// lam_out is exported for debugging but is not compared against a fake zero
+// golden tensor.
+//
+// CRC is NOT computed in-kernel; CRC verification is a downstream concern.
+// ============================================================================
 
 #include "ldpc_decode.h"
 
@@ -36,9 +36,9 @@ extern "C" size_t   GetTilingSize    ();
 extern "C" size_t   GetWorkspaceSize ();
 }
 
-
-
-
+// ---------------------------------------------------------------------------
+// ACL error-check macro
+// ---------------------------------------------------------------------------
 #define CHECK_ACL(call) do { \
     auto _e = (call); \
     if (_e != ACL_SUCCESS) { \
@@ -50,9 +50,9 @@ extern "C" size_t   GetWorkspaceSize ();
 constexpr int N_BENCH_RUNS = 10;
 using Clock = std::chrono::high_resolution_clock;
 
-
-
-
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 static size_t pad16(size_t e) { return ((e + 15) / 16) * 16; }
 
 static const char* GetDataRoot() {
@@ -97,7 +97,7 @@ static bool WriteBin(const std::string& path, const void* buf, size_t bytes) {
 }
 
 #ifndef ASCENDC_CPU_DEBUG
-
+// Allocate device buffer + check
 static void* AclMalloc(size_t bytes) {
     void* p = nullptr;
     CHECK_ACL(aclrtMalloc(&p, bytes, ACL_MEM_MALLOC_HUGE_FIRST));
@@ -113,9 +113,9 @@ static void AclMemcpyDtoH(void* dst, const void* src, size_t bytes) {
 }
 #endif
 
-
-
-
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 int main() {
     const std::string root = GetDataRoot();
     const std::string weightRoot = GetWeightRoot();
@@ -139,9 +139,9 @@ int main() {
     const size_t prev_bytes = airan::PREV_BYTES;
     const size_t bits_bytes = airan::BITS_BYTES;
 
-
-
-
+    // -----------------------------------------------------------------------
+    // Load test data
+    // -----------------------------------------------------------------------
     std::vector<int16_t> hLamIn  (airan::LDPC_C_NUM * airan::LAM_ELEMS_PER_CB);
     std::vector<int8_t>  hBitsGd (airan::LDPC_C_NUM * airan::LDPC_K);
     std::vector<int16_t> hShift  (airan::SHIFT_ELEMS);
@@ -154,9 +154,9 @@ int main() {
     if (!ReadBin(pDeg,     hDeg    .data(), airan::LDPC_MB * 2))        return 1;
     if (!ReadBin(pEOff,    hEOff   .data(), (airan::LDPC_MB + 1) * 4))  return 1;
 
-
-
-
+    // Precompute packed_bc / packed_s on host: scan shift table, skip s<0 entries.
+    // Layout: row-major [br][kk]; pads to MAX_DEG with zeros.
+    // This moves the per-launch shift-table scan from kernel to host (one-time).
     std::vector<int16_t> hPackedBc(airan::PACKED_ELEMS_TOTAL, 0);
     std::vector<int16_t> hPackedS (airan::PACKED_ELEMS_TOTAL, 0);
     for (uint32_t br = 0; br < airan::LDPC_MB; ++br) {
@@ -199,7 +199,7 @@ int main() {
     void* dPrev       = AclMalloc(szPrev);
     void* dBits       = AclMalloc(szBits);
     void* dLamOut     = AclMalloc(szLam);
-
+    // Lam scratch in GM (per-AIV stash; bufLamFlat dropped from UB)
     void* dLamScratch = AclMalloc(airan::LAM_SCRATCH_BYTES);
     CHECK_ACL(aclrtMemset(dLamScratch, airan::LAM_SCRATCH_BYTES, 0, airan::LAM_SCRATCH_BYTES));
 
@@ -222,9 +222,9 @@ int main() {
         AclMemcpyHtoD(dLamOut, init_pat.data(), szLam);
     }
 
-
-
-
+    // -----------------------------------------------------------------------
+    // Single launch for correctness verification
+    // -----------------------------------------------------------------------
     const uint32_t blockDim = 4;
     printf("\n[launch] blockDim=%u...\n", blockDim);
 
@@ -247,7 +247,7 @@ int main() {
     AclMemcpyDtoH(hLamOut.data(), dLamOut, szLam);
     AclMemcpyDtoH(hBits  .data(), dBits,   szBits);
 
-
+    // Dump both outputs for the independent verifier/debugging.
     if (WriteBin(pKBits, hBits.data(), hBits.size())) {
         printf("[dump] kernel decoded bits → %s (%zu bytes)\n",
                pKBits.c_str(), hBits.size());
@@ -257,9 +257,9 @@ int main() {
                pKLam.c_str(), hLamOut.size() * sizeof(int16_t));
     }
 
-
-
-
+    // =======================================================================
+    // Verify 2 — decoded_bits (primary correctness)
+    // =======================================================================
     {
         constexpr double BIT_ERR_TOL = 0.0005;
 
@@ -297,9 +297,9 @@ int main() {
         correctnessOk = ber <= BIT_ERR_TOL;
     }
 
-
-
-
+    // =======================================================================
+    // Benchmark — N_BENCH_RUNS × 3 launches per sync (median reported)
+    // =======================================================================
     printf("\n[bench] %d iterations (3 launches per sync)...\n", N_BENCH_RUNS);
 
     auto launch_kernel = [&]() {

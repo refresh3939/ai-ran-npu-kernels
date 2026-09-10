@@ -1,10 +1,10 @@
-
-
-
-
-
-
-
+/**
+ * @file layer_demap_kernel.cpp
+ * Fused physical-QAM-layout compaction and PUSCH layer demapping.
+ *
+ * Input per layer/q is [12,1600]. Four rows are compacted to 4*1596 in UB,
+ * then Gather changes [L,re] to [re,L]. Four AIVs own q and q+4.
+ */
 #include "kernel_operator.h"
 #include "layer_demap.h"
 
@@ -72,7 +72,7 @@ extern "C" __global__ __aicore__ void layer_demap_kernel(
         const uint32_t q = q_values[owned];
         const uint32_t q_base = q * data_stride;
         for (uint32_t group = 0; group < ldm::NUM_GROUPS; ++group) {
-
+            // Compact four [1600] rows to one [4*1596] vector for every layer.
             for (uint32_t layer = 0; layer < num_layers; ++layer) {
                 const uint32_t layer_base = layer * layer_stride + q_base;
                 const uint32_t source_base = layer * ldm::GROUP_DATA_RE;

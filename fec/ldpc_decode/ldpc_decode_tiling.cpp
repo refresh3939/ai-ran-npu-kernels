@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file ldpc_decode_tiling.cpp
+ * @brief Tiling stub. Matches encoder pattern 1:1.
+ */
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,4 +21,4 @@ extern "C" uint8_t* GenerateTiling(const char* socVersion, uint32_t blockDim)
 extern "C" size_t GetTilingSize()    { return TILING_TOTAL_SIZE; }
 extern "C" size_t GetWorkspaceSize() { return WS_TOTAL; }
 
-}
+}  // namespace airan

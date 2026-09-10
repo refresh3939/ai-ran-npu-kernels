@@ -35,7 +35,7 @@ bool MallocDevice(void **pointer, size_t bytes)
     return aclrtMalloc(pointer, bytes, ACL_MEM_MALLOC_HUGE_FIRST) == ACL_ERROR_NONE;
 }
 
-}
+}  // namespace
 
 void DestroyRuntime(MimoDmrsGenRuntimeV1 *runtime)
 {
@@ -134,4 +134,4 @@ Status Enqueue(MimoDmrsGenRuntimeV1 *runtime, const MimoDmrsGenOpArgsV1 &args)
     return OK;
 }
 
-}
+}  // namespace airan::mimo_dmrs_gen

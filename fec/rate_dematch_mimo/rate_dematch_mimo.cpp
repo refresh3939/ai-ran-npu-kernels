@@ -64,7 +64,7 @@ int16_t ScaleClip(int16_t value)
         -LLR_CLIP, std::min<int32_t>(LLR_CLIP, scaled)));
 }
 
-}
+}  // namespace
 
 Status BuildCurrentProfile(const PuschMimoConfig &config,
                            uint32_t num_slots,
@@ -87,9 +87,9 @@ Status BuildCurrentProfile(const PuschMimoConfig &config,
     layout->codeword_symbols = config.num_layers * N_DATA_RE;
     layout->codeword_stride = config.num_layers * N_DATA_PAD;
 
-
-
-
+    // TS 38.212 5.4.2.1: E_r is quantized by N_L*Q_m. Since this profile's
+    // G is exactly num_slots*N_L*Q_m*N_DATA_RE, use symbol units to avoid
+    // division rounding ambiguity.
     const uint32_t quantum = config.num_layers * Q_M;
     const uint32_t total_units = num_slots * N_DATA_RE;
     const uint32_t low_units = total_units / C_NUM;
@@ -223,4 +223,4 @@ Status Enqueue(const RateDematchMimoOpArgsV1 &args,
     return launch_status == ACL_ERROR_NONE ? OK : LAUNCH_FAILED;
 }
 
-}
+}  // namespace airan::rate_dematch_mimo

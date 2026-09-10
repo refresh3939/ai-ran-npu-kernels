@@ -1,14 +1,14 @@
-
-
-
-
-
-
-
-
-
-
-
+/**
+ * Compile-time configurable low-rank LMMSE channel estimator for Ascend 310P.
+ *
+ * Optimizations borrowed from the 64x16 detector/precoder kernels:
+ *   - eight-Rx grouping: one 16-column Cube tile is 8 Rx x 2 DMRS;
+ *   - per-layer, pre-folded B=D*U^H and A=diag(sf)*Rhp*U factors;
+ *   - Phase-A B factors remain in L0 across eight independent Rx groups;
+ *   - raw L0 TBufs and explicit MTE1<->M events;
+ *   - FixPipe converts FP32 accumulators directly to FP16 in UB;
+ *   - Wt is loaded once per layer/SC tile and reused by all eight Rx groups.
+ */
 #include "kernel_operator.h"
 #include "channel_est_lmmse.h"
 
@@ -36,7 +36,7 @@ constexpr uint32_t WT_TILE_ELEMS = N_SYMBOL * N_DMRS_SYMBOL * SC_TILE;
 constexpr uint32_t ALL_RX_COLS = N_RX_GROUP * NCOL;
 constexpr uint32_t ALL_RX_TILE_ELEMS = N_RX_GROUP * TILE_ELEMS;
 constexpr uint32_t OUT_GROUP_ELEMS = RX_GROUP * N_SYMBOL * SC_TILE;
-constexpr uint32_t GROUP_BATCH = N_RX_GROUP < 4 ? N_RX_GROUP : 4;
+constexpr uint32_t CE_GROUP_BATCH = N_RX_GROUP < 4 ? N_RX_GROUP : 4;
 #if CE_CUBE_TIME_FUSED
 constexpr uint32_t CUBE_TIME_LAYER_BATCH = NL < 4 ? NL : 4;
 constexpr uint32_t CUBE_TIME_RX_ELEMS = NR * SC_TILE;
@@ -55,7 +55,7 @@ static_assert(TIME_POST_P_L0_OFFSET + TIME_POST_P_ELEMS <= N_PILOT_PAD * NCOL,
 static_assert(NL % TIME_POST_LAYER_BATCH == 0, "post-frequency layer batch must divide NL");
 static_assert(NR % 16 == 0, "post-frequency Cube path requires NR=16,32,64");
 #endif
-static_assert(N_RX_GROUP % GROUP_BATCH == 0, "group batch must divide Rx groups");
+static_assert(N_RX_GROUP % CE_GROUP_BATCH == 0, "group batch must divide Rx groups");
 static_assert(ALL_RX_COLS % 16 == 0, "skinny Phase B rows must be Cube aligned");
 static_assert(ALL_RX_COLS * RANK <= 2 * FACTOR_TILE_ELEMS,
               "all-Rx skinny left operand exceeds the inherited L0A allocation");
@@ -99,7 +99,7 @@ public:
             (__gm__ half *)(workspace + MIN_SYNC_WORKSPACE_BYTES), T_ELEMS);
 #endif
 
-
+        // L1.  Phase-A and Phase-B buffers coexist but remain far below 1 MiB.
         pipe_->InitBuffer(factorReL1_, FACTOR_TILE_ELEMS * sizeof(half));
         pipe_->InitBuffer(factorImL1_, FACTOR_TILE_ELEMS * sizeof(half));
         pipe_->InitBuffer(hlsReL1_, N_PILOT_PAD * NCOL * sizeof(half));
@@ -126,7 +126,7 @@ public:
         pipe_->InitBuffer(timePostInputL1_, TIME_POST_A_ELEMS * sizeof(half));
 #endif
 
-
+        // Raw L0 buffers.  A2 holds two full 16x832 Phase-A factors.
         pipe_->InitBuffer(a2Buf_, 2 * FACTOR_TILE_ELEMS * sizeof(half));
         pipe_->InitBuffer(b2Buf_, N_PILOT_PAD * NCOL * sizeof(half));
 #if CE_CUBE_TIME_POST_GEMM
@@ -135,7 +135,7 @@ public:
         pipe_->InitBuffer(coBuf_, 2 * ALL_RX_TILE_ELEMS * sizeof(float));
 #endif
 
-
+        // UB. FixPipe writes half directly into hfRe/hfIm.
         pipe_->InitBuffer(hfReBuf_, ALL_RX_TILE_ELEMS * sizeof(half));
         pipe_->InitBuffer(hfImBuf_, ALL_RX_TILE_ELEMS * sizeof(half));
 #if CE_CUBE_TIME_POST_GEMM
@@ -267,20 +267,20 @@ private:
         mp.n = 16;
         mp.k = N_PILOT_PAD;
 
-
+        // B = Br + jBi, h = hr + jhi.
         LoadHlsOperand(hlsReL1_.Get<half>());
         mp.cmatrixInitVal = true;
-        Mmad(co, a2, b2, mp);
-        Mmad(co[coImOffset], a2[FACTOR_TILE_ELEMS], b2, mp);
+        Mmad(co, a2, b2, mp);                                  // tr = Br*hr
+        Mmad(co[coImOffset], a2[FACTOR_TILE_ELEMS], b2, mp);   // ti = Bi*hr
         MToMte1();
 
         LoadHlsOperand(hlsImL1_.Get<half>());
         mp.cmatrixInitVal = false;
-        Mmad(co[coImOffset], a2, b2, mp);
+        Mmad(co[coImOffset], a2, b2, mp);                       // ti += Br*hi
         MToMte1();
 
         LoadHlsOperand(hlsNegImL1_.Get<half>());
-        Mmad(co, a2[FACTOR_TILE_ELEMS], b2, mp);
+        Mmad(co, a2[FACTOR_TILE_ELEMS], b2, mp);                // tr += Bi*(-hi)
         MToMte1();
         PipeBarrier<PIPE_ALL>();
 
@@ -314,7 +314,7 @@ private:
 
     __aicore__ inline void PhaseA()
     {
-
+        // NL x rank-tile independent tasks; each task consumes every Rx group.
         for (uint32_t task = blockId_; task < NL * N_RANK_TILE; task += BLOCK_DIM) {
             const uint32_t layer = task / N_RANK_TILE;
             const uint32_t rankTile = task % N_RANK_TILE;
@@ -352,7 +352,7 @@ private:
 
     __aicore__ inline void LoadAWeightsToL0()
     {
-
+        // Three immutable right operands share one raw L0B allocation.
         auto b2 = b2Buf_.Get<half>();
         LoadData2DParams p;
         p.repeatTimes = N_RANK_TILE;
@@ -391,15 +391,15 @@ private:
         LoadTOperand(a2, tReL1_.Get<half>()[tBase]);
         Mte1ToM();
         mp.cmatrixInitVal = true;
-        Mmad(co, a2, ar, mp);
-        Mmad(co[coImOffset], a2, ai, mp);
+        Mmad(co, a2, ar, mp);                       // hr = tr*Ar
+        Mmad(co[coImOffset], a2, ai, mp);           // hi = tr*Ai
         MToMte1();
 
         LoadTOperand(a2, tImL1_.Get<half>()[tBase]);
         Mte1ToM();
         mp.cmatrixInitVal = false;
-        Mmad(co, a2, ani, mp);
-        Mmad(co[coImOffset], a2, ar, mp);
+        Mmad(co, a2, ani, mp);                      // hr += ti*(-Ai)
+        Mmad(co[coImOffset], a2, ar, mp);           // hi += ti*Ar
         MToMte1();
         PipeBarrier<PIPE_ALL>();
 
@@ -417,8 +417,8 @@ private:
         PipeBarrier<PIPE_ALL>();
     }
 
-
-
+    // True cross-group skinny GEMM:
+    //   t^T[128,96] * A[96,16] -> hf[128,16].
     __aicore__ inline void LoadTAllToL0A(const LocalTensor<half> &src)
     {
         auto a2 = a2Buf_.Get<half>();
@@ -521,7 +521,7 @@ private:
         dp.srcStride = 0;
         dp.dstStride = (N_SC_PAD - SC_TILE) / 16;
         const uint32_t sc0 = scTile * SC_TILE;
-        for (uint32_t batchSlot = 0; batchSlot < GROUP_BATCH; ++batchSlot) {
+        for (uint32_t batchSlot = 0; batchSlot < CE_GROUP_BATCH; ++batchSlot) {
             LocalTensor<half> outAllR;
             LocalTensor<half> outAllI;
             if (batchSlot == 0) {
@@ -615,9 +615,9 @@ private:
     __aicore__ inline void PackTimePostComponent(const LocalTensor<half> &srcUb,
                                                   uint32_t dstMBlockBase)
     {
-
-
-
+        // Pack the [NR,32] row-major frequency result directly into 16x16
+        // A-fractal source tiles in L1.  This removes a full UB Gather;
+        // each MTE3 command copies one strided 16x16 tile.
         DataCopyParams pack;
         pack.blockCount = 16;
         pack.blockLen = 1;
@@ -697,9 +697,9 @@ private:
 #if CE_CUBE_TIME_FUSED
     __aicore__ inline void InitGatherIndex()
     {
-
-
-
+        // Gather the DMRS0 row of every Rx from the interleaved
+        // [group,rx,dmrs,sc] Cube result.  Passing source[SC_TILE] with the
+        // same offsets selects the adjacent DMRS1 rows.
         auto index = gatherIdxBuf_.Get<uint32_t>();
         for (uint32_t rx = 0; rx < NR; ++rx) {
             const uint32_t group = rx / RX_GROUP;
@@ -857,15 +857,15 @@ private:
                     LoadAAndWt(firstLayer + layerInBatch, scTile);
 #if CE_PHASE2_SKINNY
                     GemmHfAllGroups(layerInBatch);
-                    for (uint32_t firstGroup = 0; firstGroup < N_RX_GROUP; firstGroup += GROUP_BATCH) {
-                        for (uint32_t slot = 0; slot < GROUP_BATCH; ++slot) {
+                    for (uint32_t firstGroup = 0; firstGroup < N_RX_GROUP; firstGroup += CE_GROUP_BATCH) {
+                        for (uint32_t slot = 0; slot < CE_GROUP_BATCH; ++slot) {
                             TimeToGroup((firstGroup + slot) * TILE_ELEMS, slot);
                         }
                         StoreGroupBatch(firstLayer + layerInBatch, scTile, firstGroup);
                     }
 #else
-                    for (uint32_t firstGroup = 0; firstGroup < N_RX_GROUP; firstGroup += GROUP_BATCH) {
-                        for (uint32_t slot = 0; slot < GROUP_BATCH; ++slot) {
+                    for (uint32_t firstGroup = 0; firstGroup < N_RX_GROUP; firstGroup += CE_GROUP_BATCH) {
+                        for (uint32_t slot = 0; slot < CE_GROUP_BATCH; ++slot) {
                             GemmHfGroup(layerInBatch, firstGroup + slot);
                             TimeToGroup(0, slot);
                         }

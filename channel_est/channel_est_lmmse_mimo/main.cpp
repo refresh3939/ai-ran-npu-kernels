@@ -67,7 +67,7 @@ void EnsureDirectory(const std::string &path)
     }
 }
 
-}
+}  // namespace
 
 int main()
 {
@@ -175,10 +175,10 @@ int main()
     const size_t tImBytes = T_ELEMS * halfBytes;
     const size_t activeOutputBytes = OUT_ELEMS * halfBytes;
     const size_t paddedOutputBytes = PADDED_OUT_ELEMS * halfBytes;
-
-
-
-
+    // The kernel only uses workspace for four-core software SyncAll.  Keep the
+    // same conservative 4 MiB allocation as the proven predecessor instead of
+    // querying PlatformAscendCManager at runtime (that query is not stable on
+    // all 310P driver/toolkit combinations).
     constexpr size_t workspaceBytes = 4 * 1024 * 1024;
 
     CHECK_ACL(aclrtMalloc(reinterpret_cast<void **>(&hr), hlsBytes, ACL_MEM_MALLOC_HUGE_FIRST));
@@ -244,8 +244,8 @@ int main()
     CHECK_ACL(aclrtSynchronizeStream(stream));
 
     auto prepare = [&]() {
-
-
+        // Phase-A uses atomic add so only its small scratch and SyncAll workspace
+        // must be cleared per launch; the output is fully overwritten.
         CHECK_ACL(aclrtMemset(tRe, tReBytes, 0, tReBytes));
         CHECK_ACL(aclrtMemset(tIm, tImBytes, 0, tImBytes));
         CHECK_ACL(aclrtMemset(workspace, workspaceBytes, 0, workspaceBytes));

@@ -151,7 +151,7 @@ MimoDetectLayerPlan MakeLayerPlan(
     return plan;
 }
 
-}
+}  // namespace
 
 int main()
 {
@@ -167,14 +167,7 @@ int main()
     aclrtStream stream = nullptr;
     ACL_CHECK(aclrtCreateStream(&stream));
     {
-        std::vector<PuschMimoConfig> configs;
-        configs.push_back(MakeConfig(4, 4));
-        if (NR == 32) {
-            configs.push_back(MakeConfig(4, 4));
-        } else if (NR == 64) {
-            configs.push_back(MakeConfig(3, 4));
-            configs.push_back(MakeConfig(2, 2));
-        }
+        std::vector<PuschMimoConfig> configs {MakeConfig(4, 4)};
         const MimoDetectLayerPlan layer_plan = MakeLayerPlan(configs);
         KernelMetadata metadata {};
         if (BuildCurrentProfile(configs.data(), configs.size(), layer_plan,
@@ -183,7 +176,7 @@ int main()
             std::exit(EXIT_FAILURE);
         }
         MimoDetectLayerPlan invalid_plan = layer_plan;
-        ++invalid_plan.allocations[1].layer_offset;
+        ++invalid_plan.total_layers;
         if (BuildCurrentProfile(configs.data(), configs.size(), invalid_plan,
                                 &metadata) != PLAN_MISMATCH) {
             std::fprintf(stderr, "[FAIL] non-contiguous layer plan was accepted\n");

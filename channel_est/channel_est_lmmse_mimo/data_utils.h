@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file data_utils.h
+ * Small, self-contained host I/O helpers used by the standalone verifier.
+ */
 #pragma once
 
 #include <cerrno>
@@ -12,7 +12,7 @@
 #include <limits>
 #include <string>
 
-
+// CHECK_ACL is expanded only by host launchers that already include acl/acl.h.
 #define CHECK_ACL(expression)                                                       \
     do {                                                                            \
         const aclError airan_acl_status = (expression);                              \
@@ -24,9 +24,9 @@
         }                                                                            \
     } while (0)
 
-
-
-
+/** Read exactly expectedSize bytes. Missing, short, oversized, or unreadable
+ * files all return false; callers treat false as a fatal input-contract error.
+ */
 inline bool ReadFile(const std::string &path, size_t &fileSize,
                      void *buffer, size_t expectedSize)
 {
@@ -65,7 +65,7 @@ inline bool ReadFile(const std::string &path, size_t &fileSize,
     return true;
 }
 
-
+/** Write exactly size bytes and report open, write, flush, or close failures. */
 inline bool WriteFile(const std::string &path, const void *buffer, size_t size)
 {
     if ((buffer == nullptr && size != 0) ||

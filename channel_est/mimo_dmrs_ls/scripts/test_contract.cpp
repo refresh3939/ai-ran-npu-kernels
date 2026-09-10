@@ -104,7 +104,7 @@ void CheckCase(const uint16_t *ports, uint16_t numLayers,
             "natural [rx,layer,dmrs,pilot] stride mismatch");
 }
 
-}
+}  // namespace
 
 int main()
 {

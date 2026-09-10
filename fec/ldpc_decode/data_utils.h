@@ -1,3 +1,12 @@
+/**
+ * @file data_utils.h
+ *
+ * Copyright (C) 2023-2024. Huawei Technologies Co., Ltd. All rights reserved.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ */
 #ifndef DATA_UTILS_H
 #define DATA_UTILS_H
 #include <fcntl.h>
@@ -45,12 +54,12 @@ typedef enum {
         }                                                                                   \
     } while (0);
 
-
-
-
-
-
-
+/**
+ * @brief Read data from file
+ * @param [in] filePath: file path
+ * @param [out] fileSize: file size
+ * @return read result
+ */
 bool ReadFile(const std::string &filePath, size_t &fileSize, void *buffer, size_t bufferSize)
 {
     struct stat sBuf;
@@ -90,13 +99,13 @@ bool ReadFile(const std::string &filePath, size_t &fileSize, void *buffer, size_
     return true;
 }
 
-
-
-
-
-
-
-
+/**
+ * @brief Write data to file
+ * @param [in] filePath: file path
+ * @param [in] buffer: data to write to file
+ * @param [in] size: size to write
+ * @return write result
+ */
 bool WriteFile(const std::string &filePath, const void *buffer, size_t size)
 {
     if (buffer == nullptr) {
@@ -191,4 +200,4 @@ void PrintData(const void *data, size_t count, printDataType dataType, size_t el
     }
     std::cout << std::endl;
 }
-#endif
+#endif // DATA_UTILS_H

@@ -1,15 +1,17 @@
 {
   "schema_version": 1,
   "chain": "pusch_mimo_rx_chain",
-  "claim": "staged_device_orchestrator_rank1_to_rank4_e2e_verified",
+  "claim": "fused_rank4_and_staged_rank1_to_rank4_device_e2e_verified",
   "mimo_profile_contract": {
-    "profile_name": "fd8x8_rank1_4",
-    "path": "common/profiles/fd8x8_rank1_4.json",
+    "radio_name": "fd16x64",
+    "radio_path": "common/radio_profiles/fd16x64.json",
+    "grant_path": "common/pusch_grants/full_band.json",
     "ranks": [1, 2, 3, 4]
   },
   "stage_order": [
     "ofdm_demod_batch",
     "re_demap_batch",
+    "mimo_dmrs_gen",
     "mimo_dmrs_ls",
     "channel_est_lmmse_mimo",
     "mimo_detect_io_pack",
@@ -42,15 +44,18 @@
     "nr_bit_to_qam_stream": [0,4,1,5,2,6,3,7]
   },
   "source_requirements": [
-    {"id": "shared_pusch_mimo_abi", "path": "common/pusch_mimo_types.h", "severity": "hard_fail"}
+    {"id": "shared_pusch_mimo_abi", "path": "common/pusch_mimo_types.h", "severity": "hard_fail"},
+    {"id": "fused_rx_source", "path": "chain/pusch_mimo_rx_chain/rx_chain.cpp", "severity": "hard_fail"},
+    {"id": "fused_rx_build", "path": "chain/pusch_mimo_rx_chain/CMakeLists.txt", "severity": "hard_fail"}
   ],
   "operators": [
     {"id": "ofdm_demod_batch", "required": true, "path_candidates": ["ofdm/ofdm_demod_batch"], "required_files": ["ofdm_demod.h", "ofdm_demod_kernel.cpp"]},
     {"id": "re_demap_batch", "required": true, "path_candidates": ["mapping/re_demap_batch"], "required_files": ["re_demap_batch.h", "re_demap_batch.cpp"]},
+    {"id": "mimo_dmrs_gen", "required": true, "path_candidates": ["mimo/mimo_dmrs_gen"], "required_files": ["mimo_dmrs_gen.h", "mimo_dmrs_gen.cpp", "mimo_dmrs_gen_kernel.cpp"]},
     {"id": "mimo_dmrs_ls", "required": true, "path_candidates": ["channel_est/mimo_dmrs_ls", "rx/mimo_dmrs_ls"], "required_files": ["mimo_dmrs_ls.h", "mimo_dmrs_ls.cpp"]},
     {"id": "channel_est_lmmse_mimo", "required": true, "path_candidates": ["channel_est/channel_est_lmmse_mimo", "rx/channel_est_lmmse"], "required_files": ["channel_est_lmmse.h", "channel_est_lmmse.cpp", "operator.yaml"]},
     {"id": "mimo_detect_io_pack", "required": true, "path_candidates": ["mimo/mimo_detect_io_pack", "rx/mimo_detect_io_pack"], "required_files": ["mimo_detect_io_pack.h", "mimo_detect_io_pack.cpp"]},
-    {"id": "mimo_detect_bri_batch", "required": true, "path_candidates": ["mimo/mimo_detect_bri_batch", "rx/mimo_detect_bri_batch"], "required_files": ["README.md", "mimo_detect_bri.h", "mimo_detect_bri_kernel.cpp"]},
+    {"id": "mimo_detect_bri_batch", "required": true, "path_candidates": ["mimo/mimo_detect_bri_batch", "rx/mimo_detect_bri_batch"], "required_files": ["mimo_detect_bri.h", "mimo_detect_bri_kernel.cpp"]},
     {"id": "qam_demod_256_mimo_batch", "required": true, "path_candidates": ["mapping/qam_demod_256_mimo_batch", "rx/qam_demod_256_batch"], "required_files": ["qam256_demod_batch.h", "qam256_demod_batch.cpp"]},
     {"id": "layer_demap_mimo", "required": true, "path_candidates": ["mapping/layer_demap_mimo", "rx/layer_demap"], "required_files": ["layer_demap.h", "layer_demap.cpp"]},
     {"id": "descramble_mimo", "required": true, "path_candidates": ["fec/descramble_mimo"], "required_files": ["descramble_mimo.h", "descramble_mimo.cpp"]},
@@ -61,8 +66,7 @@
     {"id": "ls_natural_mixed_models", "operator": "mimo_dmrs_ls", "file": "mimo_dmrs_ls.h", "regex": "Both 798 and 399 are canonical CE[\\s\\S]*mixed model such as \\[399,399,798\\]"},
     {"id": "ce_rank3_mixed_supported", "operator": "channel_est_lmmse_mimo", "file": "operator.yaml", "regex": "rank3_mixed_399_798:[\\s\\S]*observation_count: \\[399, 399, 798\\][\\s\\S]*behavior: supported"},
     {"id": "ce_rank4_399_supported", "operator": "channel_est_lmmse_mimo", "file": "operator.yaml", "regex": "rank4_shared_comb_399:[\\s\\S]*observation_count: \\[399, 399, 399, 399\\][\\s\\S]*behavior: supported"},
-    {"id": "ce_io_pack_physical16", "operator": "channel_est_lmmse_mimo", "file": "operator.yaml", "regex": "shape: \\[NR, 16, 14, 1664\\][\\s\\S]*consumer: mimo_detect_io_pack"},
-    {"id": "ce_rank3_rank4_npu_verified", "operator": "channel_est_lmmse_mimo", "file": "README.md", "regex": "Rank3 device kernel[\\s\\S]*1311\\.6 us[\\s\\S]*Rank4 device kernel[\\s\\S]*1714\\.0 us[\\s\\S]*inactive layers[\\s\\S]*零"}
+    {"id": "ce_io_pack_physical16", "operator": "channel_est_lmmse_mimo", "file": "operator.yaml", "regex": "shape: \\[NR, 16, 14, 1664\\][\\s\\S]*consumer: mimo_detect_io_pack"}
   ],
   "observation_profiles": [
     {
@@ -183,6 +187,31 @@
         {"path": "chain/pusch_mimo_loopback/evidence/rank2_23slot_e2e.json", "required": {"status": "PASS", "rank": 2, "slots": 23, "matched_info_ber": 0.0, "complete_coded_e2e": true}, "numeric": {"tx_bits_nonzero": {"min_exclusive": 0}, "wrong_cell_info_ber": {"min": 0.4, "max": 0.6}}},
         {"path": "chain/pusch_mimo_loopback/evidence/rank3_23slot_e2e.json", "required": {"status": "PASS", "rank": 3, "slots": 23, "matched_info_ber": 0.0, "complete_coded_e2e": true}, "numeric": {"tx_bits_nonzero": {"min_exclusive": 0}, "wrong_cell_info_ber": {"min": 0.4, "max": 0.6}}},
         {"path": "chain/pusch_mimo_loopback/evidence/rank4_23slot_e2e.json", "required": {"status": "PASS", "rank": 4, "slots": 23, "matched_info_ber": 0.0, "complete_coded_e2e": true}, "numeric": {"tx_bits_nonzero": {"min_exclusive": 0}, "wrong_cell_info_ber": {"min": 0.4, "max": 0.6}}}
+      ],
+      "evidence": []
+    },
+    {
+      "id": "rx_rank4_single_process_fused_npu",
+      "status": "resolved",
+      "message": "The 16TX x 64RX Rank4 fused executable must decode the 23-slot payload with zero bit errors.",
+      "artifact_evidence": [
+        {
+          "path": "chain/pusch_mimo_rx_chain/evidence/fd16x64_rank4_fused_rx_20260909.json",
+          "required": {
+            "schema": "airan.pusch_mimo.fused_rx.v1",
+            "status": "PASS",
+            "rank": 4,
+            "tx_antennas": 16,
+            "rx_antennas": 64,
+            "slots": 23,
+            "single_acl_context": true,
+            "single_stream": true,
+            "intermediate_d2h": false,
+            "grouped_rhs_on_device": true,
+            "bit_errors": 0
+          },
+          "numeric": {"wall_ms": {"min_exclusive": 0}}
+        }
       ],
       "evidence": []
     }

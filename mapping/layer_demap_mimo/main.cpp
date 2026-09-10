@@ -221,7 +221,7 @@ void RunCase(aclrtStream stream, uint16_t layers)
                 name.c_str(), layers, layers * N_DATA_PAD, latency_us);
 }
 
-}
+}  // namespace
 
 int main()
 {

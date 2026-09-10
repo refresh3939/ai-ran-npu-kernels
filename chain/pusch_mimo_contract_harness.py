@@ -22,6 +22,7 @@ COMMON_ROOT = Path(__file__).resolve().parent.parent / "common"
 if str(COMMON_ROOT) not in sys.path:
     sys.path.insert(0, str(COMMON_ROOT))
 
+from mimo_config_compiler import compile_config
 from mimo_profile_compiler import ProfileError, compile_profile
 
 
@@ -197,11 +198,14 @@ def validate_mimo_profile_contract(matrix: dict[str, Any], kernel_root: Path,
     if not isinstance(spec, dict):
         findings.append(Finding("error", "mimo_profile_contract", "must be an object"))
         return
-    required = {"profile_name", "path", "ranks"}
-    if set(spec) != required:
+    split_required = {"radio_name", "radio_path", "grant_path", "ranks"}
+    legacy_required = {"profile_name", "path", "ranks"}
+    if set(spec) not in (split_required, legacy_required):
         findings.append(Finding(
             "error", "mimo_profile_contract",
-            f"must contain exactly {sorted(required)}, got {sorted(spec)}"))
+            "must use the split radio/grant contract "
+            f"{sorted(split_required)} (or legacy {sorted(legacy_required)}), "
+            f"got {sorted(spec)}"))
         return
     ranks = spec.get("ranks")
     if (not isinstance(ranks, list) or not ranks or
@@ -210,17 +214,25 @@ def validate_mimo_profile_contract(matrix: dict[str, Any], kernel_root: Path,
         findings.append(Finding("error", "mimo_profile_contract.ranks",
                                 "must be a non-empty strictly increasing integer list"))
         return
-    path = kernel_root / str(spec["path"])
     plans: list[dict[str, Any]] = []
     try:
-        plans = [compile_profile(path, rank).value for rank in ranks]
+        if set(spec) == split_required:
+            radio_path = kernel_root / str(spec["radio_path"])
+            grant_path = kernel_root / str(spec["grant_path"])
+            plans = [compile_config(radio_path, grant_path, rank).value
+                     for rank in ranks]
+            expected_name = spec["radio_name"]
+        else:
+            path = kernel_root / str(spec["path"])
+            plans = [compile_profile(path, rank).value for rank in ranks]
+            expected_name = spec["profile_name"]
     except (ProfileError, OSError, ValueError) as error:
         findings.append(Finding("error", "mimo_profile_contract",
-                                f"profile compilation failed: {error}"))
+                                f"configuration compilation failed: {error}"))
         return
-    if any(plan["source"]["profile_name"] != spec["profile_name"] for plan in plans):
-        findings.append(Finding("error", "mimo_profile_contract.profile_name",
-                                "compiled profile name mismatch"))
+    if any(plan["source"]["profile_name"] != expected_name for plan in plans):
+        findings.append(Finding("error", "mimo_profile_contract.radio_name",
+                                "compiled radio name mismatch"))
     if any(plan["spatial"]["supported_ranks"] != ranks for plan in plans):
         findings.append(Finding("error", "mimo_profile_contract.ranks",
                                 "compiled supported ranks mismatch"))
@@ -382,7 +394,10 @@ def audit(matrix: dict[str, Any], kernel_root: Path) -> tuple[list[Finding], dic
 def emit_human(matrix: dict[str, Any], kernel_root: Path, findings: list[Finding], resolved: dict[str, Path]) -> None:
     print(f"CONTRACT_MATRIX {matrix.get('chain')} schema={matrix.get('schema_version')} root={kernel_root}")
     profile = matrix.get("mimo_profile_contract", {})
-    if isinstance(profile, dict) and profile.get("path"):
+    if isinstance(profile, dict) and profile.get("radio_path"):
+        print(f"  RADIO {profile.get('radio_name')}: {kernel_root / profile['radio_path']}")
+        print(f"  GRANT: {kernel_root / profile['grant_path']}")
+    elif isinstance(profile, dict) and profile.get("path"):
         print(f"  PROFILE {profile.get('profile_name')}: {kernel_root / profile['path']}")
     for op_id in matrix.get("stage_order", []):
         if op_id in resolved:

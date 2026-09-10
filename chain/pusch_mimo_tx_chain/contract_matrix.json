@@ -3,8 +3,9 @@
   "chain": "pusch_mimo_tx_chain",
   "claim": "fused_single_context_tx_rank1_to_rank4_and_staged_coded_e2e_verified",
   "mimo_profile_contract": {
-    "profile_name": "fd8x8_rank1_4",
-    "path": "common/profiles/fd8x8_rank1_4.json",
+    "radio_name": "fd16x64",
+    "radio_path": "common/radio_profiles/fd16x64.json",
+    "grant_path": "common/pusch_grants/full_band.json",
     "ranks": [1, 2, 3, 4]
   },
   "stage_order": [
@@ -16,6 +17,7 @@
     "mimo_dmrs_gen",
     "mimo_resource_grid_map",
     "pusch_codebook_precode_or_bypass",
+    "tx_antenna_map",
     "re_map_batch",
     "ofdm_mod_batch"
   ],
@@ -59,6 +61,7 @@
     {"id": "mimo_dmrs_gen", "required": true, "path_candidates": ["mimo/mimo_dmrs_gen", "tx/mimo_dmrs_gen"], "required_files": ["mimo_dmrs_gen.h", "mimo_dmrs_gen_kernel.cpp"]},
     {"id": "mimo_resource_grid_map", "required": true, "path_candidates": ["mapping/mimo_resource_grid_map", "tx/mimo_resource_grid_map"], "required_files": ["mimo_resource_grid_map.h", "mimo_resource_grid_map.cpp"]},
     {"id": "pusch_codebook_precode_or_bypass", "required": true, "path_candidates": ["mimo/pusch_codebook_precode"], "required_files": ["pusch_codebook_precode.h", "pusch_codebook_precode_runtime.cpp"]},
+    {"id": "tx_antenna_map", "required": true, "path_candidates": ["mimo/pusch_codebook_precode"], "required_files": ["pusch_codebook_precode.h", "pusch_codebook_precode_runtime.cpp"]},
     {"id": "re_map_batch", "required": true, "path_candidates": ["mapping/re_map_batch"], "required_files": ["re_map_batch.h", "re_map_batch.cpp"]},
     {"id": "ofdm_mod_batch", "required": true, "path_candidates": ["ofdm/ofdm_mod_batch"], "required_files": ["ofdm_mod.h", "ofdm_mod_kernel.cpp"]}
   ],
@@ -107,16 +110,22 @@
       "consumer_contract": {"dtype": "float16_complex_split", "shape": ["L",14,1664], "layout": "layer_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "L=1..4", "port_semantics": "logical_layer"}
     },
     {
-      "id": "tx_e08_precode_to_remap",
-      "producer": "pusch_codebook_precode_or_bypass", "consumer": "re_map_batch",
-      "producer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,1664], "layout": "port_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "L<=P; bypass_requires_L=P", "port_semantics": "physical_tx_port_P_in_{1,2,4}"},
-      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,1664], "layout": "port_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "L<=P; bypass_requires_L=P", "port_semantics": "physical_tx_port_P_in_{1,2,4}"}
+      "id": "tx_e08_precode_to_antenna_map",
+      "producer": "pusch_codebook_precode_or_bypass", "consumer": "tx_antenna_map",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,1664], "layout": "port_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "logical_P=1..4", "port_semantics": "logical_tx_port"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,1664], "layout": "port_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "logical_P=1..4", "port_semantics": "logical_tx_port"}
     },
     {
-      "id": "tx_e09_remap_to_ofdm",
+      "id": "tx_e09_antenna_map_to_remap",
+      "producer": "tx_antenna_map", "consumer": "re_map_batch",
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["A",14,1664], "layout": "antenna_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_antenna_batch_A_in_[1,16]"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["A",14,1664], "layout": "antenna_symbol_natural_sc", "padding": "sc_[1596,1664)=positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_antenna_batch_A_in_[1,16]"}
+    },
+    {
+      "id": "tx_e10_remap_to_ofdm",
       "producer": "re_map_batch", "consumer": "ofdm_mod_batch",
-      "producer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,32,64], "layout": "port_symbol_stage4", "padding": "fft_guard_positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_port_batch"},
-      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["P",14,32,64], "layout": "port_symbol_stage4", "padding": "fft_guard_positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_port_batch"}
+      "producer_contract": {"dtype": "float16_complex_split", "shape": ["A",14,32,64], "layout": "antenna_symbol_stage4", "padding": "fft_guard_positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_antenna_batch_A_in_[1,16]"},
+      "consumer_contract": {"dtype": "float16_complex_split", "shape": ["A",14,32,64], "layout": "antenna_symbol_stage4", "padding": "fft_guard_positive_zero", "bit_order": "not_applicable", "active_layers": "not_applicable", "port_semantics": "physical_tx_antenna_batch_A_in_[1,16]"}
     }
   ],
   "hard_gates": [

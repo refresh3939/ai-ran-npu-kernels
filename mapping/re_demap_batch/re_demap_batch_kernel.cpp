@@ -1,12 +1,12 @@
-
-
-
-
-
-
-
-
-
+/**
+ * @file re_demap_batch_kernel.cpp
+ * Runtime-batch RE demapper for Ascend 310P (dav_m200).
+ *
+ * Input planes use the exact [NR,14,32,64] stage-4 layout emitted by
+ * ofdm_demod_batch. Output planes are [NR,14,1664] in natural used-SC order.
+ * Every [1596,1664) tail is explicitly zeroed before it reaches channel
+ * estimation or detector packing.
+ */
 #include "kernel_operator.h"
 #include "re_demap_batch_kernel.h"
 
@@ -83,9 +83,9 @@ __aicore__ inline void ReDemapBatch::GatherOne(
     SetFlag<HardEvent::MTE2_V>(copyIn);
     WaitFlag<HardEvent::MTE2_V>(copyIn);
 
-
-
-
+    // Keep the already validated 1664-element Gather path, then overwrite the
+    // storage tail. This does not rely on the input element selected by the
+    // padding entries in the shared offset table.
     Gather(destination, source, index, static_cast<uint32_t>(0), N_SC_PAD);
     Duplicate(destination[N_SC_USED], static_cast<half>(0), N_SC_PAD - N_SC_USED);
 

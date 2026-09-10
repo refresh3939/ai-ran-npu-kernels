@@ -15,7 +15,7 @@ void Require(bool value, const char *message)
     }
 }
 
-}
+}  // namespace
 
 int main()
 {
@@ -39,8 +39,8 @@ int main()
     Require(!ValidateMimoDetectBriHostContract(bad, &reason),
             "non-convergent L=16/B=4 was accepted");
 
-
-
+    // One shared all-zero matrix is a valid hrm plane and repeated-y yvpad
+    // plane. This keeps the test's peak allocation near one physical tensor.
     std::vector<uint16_t> matrix(MimoIoMatrixElements(), 0);
     std::vector<uint16_t> noise(MimoIoNoiseElements(), 0);
     Require(ValidateMimoDetectBriPhysicalInputs(
@@ -57,7 +57,7 @@ int main()
                 noise.data(), noise.size(), &reason),
             "legacy N_RE/8 y_group-sized input was accepted");
 
-    matrix[4] = 0x3c00u;
+    matrix[4] = 0x3c00u;  // 1.0 in first inactive H column.
     Require(!ValidateMimoDetectBriPhysicalInputs(
                 contract,
                 matrix.data(), matrix.size(), matrix.data(), matrix.size(),
@@ -66,7 +66,7 @@ int main()
             "non-zero inactive H layer was accepted");
     matrix[4] = 0;
 
-    matrix[1] = 0x3c00u;
+    matrix[1] = 0x3c00u;  // layer 1 differs from layer 0 in yvpad.
     Require(!ValidateMimoDetectBriPhysicalInputs(
                 contract,
                 matrix.data(), matrix.size(), matrix.data(), matrix.size(),
@@ -75,7 +75,7 @@ int main()
             "non-repeated yvpad was accepted");
     matrix[1] = 0;
 
-    noise[0] = 0xbc00u;
+    noise[0] = 0xbc00u;  // -1.0
     Require(!ValidateMimoDetectBriPhysicalInputs(
                 contract,
                 matrix.data(), matrix.size(), matrix.data(), matrix.size(),

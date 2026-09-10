@@ -1,8 +1,8 @@
-
-
-
-
-
+/**
+ * @file mimo_dmrs_gen_tiling.cpp — placeholder tiling
+ *
+ * The wrapper overwrites this buffer with KernelMetadata for each launch.
+ */
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -11,7 +11,7 @@ namespace {
 constexpr size_t TILING_TOTAL_SIZE = 128;
 }
 
-extern "C" void GenerateTiling(const char *  , uint8_t *buf)
+extern "C" void GenerateTiling(const char * /*socVersion*/, uint8_t *buf)
 {
     std::memset(buf, 0, TILING_TOTAL_SIZE);
     std::printf("[tiling] mimo_dmrs_gen: 128-byte runtime metadata buffer\n");

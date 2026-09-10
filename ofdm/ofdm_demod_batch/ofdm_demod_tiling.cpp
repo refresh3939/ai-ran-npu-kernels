@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file ofdm_demod_tiling.cpp — Mmad 改造后保留 tiling 接口兼容 main.cpp
+ *   生成 1 个合法 tiling 避免 main 内堆越界 (本算子实际不读 tiling)
+ */
 #include <cassert>
 #include <cstdio>
 #include <iostream>

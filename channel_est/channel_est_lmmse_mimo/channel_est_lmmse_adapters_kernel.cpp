@@ -1,4 +1,4 @@
-
+/** Device adapters for the natural MIMO boundary and fixed-width detector ABI. */
 #include "kernel_operator.h"
 #include "channel_est_lmmse.h"
 

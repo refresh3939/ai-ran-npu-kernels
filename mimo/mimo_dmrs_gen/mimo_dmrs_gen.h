@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file mimo_dmrs_gen.h
+ * Standard NR PUSCH Type-1 MIMO DMRS contract and current kernel ABI metadata.
+ */
 #pragma once
 
 #include <cstddef>
@@ -12,8 +12,8 @@
 namespace airan::mimo_dmrs_gen {
 
 constexpr uint32_t ABI_VERSION = PUSCH_MIMO_ABI_VERSION;
-
-
+// The canonical detector ABI allows larger tensors; this TX profile and the
+// PuschMimoConfig DMRS-port array intentionally support Rank 1..4.
 constexpr uint32_t MAX_LAYERS = 4;
 constexpr uint32_t N_SYMBOLS = 14;
 constexpr uint32_t N_SC_USED = 1596;
@@ -44,9 +44,9 @@ enum Status : int32_t {
     LAUNCH_FAILED = -4,
 };
 
-
-
-
+// Public chain arguments. The logical outputs are [L,D,896]. The current
+// low-level kernel writes a [4,2,896] physical buffer; the runtime adapter
+// owns that compatibility detail and exposes only the active logical prefix.
 struct MimoDmrsGenOpArgsV1 {
     uint16_t abi_version;
     uint16_t struct_size;
@@ -57,13 +57,13 @@ struct MimoDmrsGenOpArgsV1 {
     void *stream;
 };
 
-
-
-
+// Opaque adapter state. Create/Destroy must run after ACL initialization and
+// with the intended device context current. A handle has one private staging
+// slot: synchronize its stream before another Enqueue or DestroyRuntime.
 struct MimoDmrsGenRuntimeV1;
 
-
-
+// Private 128-byte descriptor carried in the existing trailing tiling slot.
+// This keeps the low-level parameter order unchanged.
 struct KernelMetadata {
     uint32_t magic;
     uint32_t num_layers;
@@ -79,14 +79,14 @@ struct KernelMetadata {
 };
 static_assert(sizeof(KernelMetadata) == TILING_BYTES, "metadata ABI must be 128 bytes");
 
-constexpr uint32_t META_MAGIC = 0x4d444731u;
+constexpr uint32_t META_MAGIC = 0x4d444731u;  // "MDG1"
 constexpr uint32_t META_WF_ODD_NEGATIVE_WORD =
     offsetof(KernelMetadata, wf_odd_negative) / sizeof(uint32_t);
 constexpr uint32_t META_WT_NEGATIVE_WORD =
     offsetof(KernelMetadata, wt_negative) / sizeof(uint32_t);
 
-
-
+// TS 38.211 Type-1, single-symbol DMRS port semantics supported by the
+// current TX/RX chain. Port is the configured 1000-based antenna port.
 struct PortOccSemantics {
     uint32_t port_index;
     uint32_t comb_delta;
@@ -103,14 +103,14 @@ Status BuildCurrentProfile(const PuschMimoConfig &config,
 
 Status ValidateOpArgs(const MimoDmrsGenOpArgsV1 &args);
 
-
-
-
+// Public runtime adapter. It owns c_init, Gold basis, tiling metadata and the
+// legacy [4,2,896] output. Enqueue copies only the contiguous active logical
+// [L,D,896] prefix to args.dmrs_re/im and does not synchronize the stream.
 Status CreateRuntime(MimoDmrsGenRuntimeV1 **runtime);
 Status Enqueue(MimoDmrsGenRuntimeV1 *runtime, const MimoDmrsGenOpArgsV1 &args);
 void DestroyRuntime(MimoDmrsGenRuntimeV1 *runtime);
 
-
+// Host-generated, c_init-independent Gold basis consumed by the legacy ABI.
 void BuildGoldBasis(uint16_t *gmat, uint16_t *g1);
 
 constexpr size_t LogicalOutputElems(uint32_t num_layers, uint32_t num_dmrs_symbols) {
@@ -120,4 +120,4 @@ constexpr size_t PhysicalOutputElems() {
     return static_cast<size_t>(MAX_LAYERS) * CURRENT_DMRS_SYMBOLS * N_DMRS_PAD;
 }
 
-}
+}  // namespace airan::mimo_dmrs_gen

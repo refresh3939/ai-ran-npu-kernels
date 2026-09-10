@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cstring>
 
-extern "C" void GenerateTiling(const char *  , uint8_t *buffer)
+extern "C" void GenerateTiling(const char * /*soc_version*/, uint8_t *buffer)
 {
     std::memset(buffer, 0, airan::rate_dematch_mimo::TILING_BYTES);
 }

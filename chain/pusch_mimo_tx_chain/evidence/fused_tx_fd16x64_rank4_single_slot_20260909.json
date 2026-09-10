@@ -1,0 +1,20 @@
+{
+  "schema": "airan.pusch_mimo.tx_chain.evidence.v1",
+  "date": "2026-09-09",
+  "device": "Ascend310P1",
+  "profile": "fd16x64_rank1_4",
+  "rank": 4,
+  "logical_tx_ports": 4,
+  "physical_tx_antennas": 16,
+  "physical_rx_antennas_in_profile": 64,
+  "slots": 1,
+  "output_bytes": 1966080,
+  "output_sha256": "72c86f430fc528e5e77daa52b2d9bfe1c767b913b7e87e6e84e8798a5363af2d",
+  "nonzero_i16": 981750,
+  "saturated_i16": 0,
+  "elapsed_ms": 5.674044,
+  "single_acl_context": true,
+  "shared_device_arena": true,
+  "intermediate_host_files": false,
+  "status": "PASS"
+}

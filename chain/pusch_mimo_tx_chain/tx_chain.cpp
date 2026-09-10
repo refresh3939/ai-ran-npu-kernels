@@ -199,7 +199,8 @@ PuschMimoConfig LegacyConfig(uint16_t rank)
     return config;
 }
 
-PuschMimoConfig ResolveConfig(const RunOptions &options, bool *profile_enabled)
+PuschMimoConfig ResolveConfig(const RunOptions &options, bool *profile_enabled,
+                              PuschMimoRuntimeConfig *runtime_out)
 {
     PuschMimoRuntimeConfig runtime{};
     std::string why;
@@ -209,7 +210,9 @@ PuschMimoConfig ResolveConfig(const RunOptions &options, bool *profile_enabled)
     }
     PuschMimoConfig config{};
     if (*profile_enabled) {
-        if (runtime.num_layers > MAX_LAYERS || runtime.num_tx_ports > MAX_PORTS ||
+        if (runtime.num_layers > MAX_LAYERS ||
+            runtime.num_tx_ports > MAX_LOGICAL_PORTS ||
+            runtime.num_tx_antennas > MAX_TX_ANTENNAS ||
             runtime.qm != 8 || runtime.num_symbols != 14 ||
             runtime.fft_size != 2048 || runtime.used_subcarriers != 1596 ||
             runtime.padded_subcarriers != 1664 || runtime.num_dmrs_symbols != 2) {
@@ -222,9 +225,12 @@ PuschMimoConfig ResolveConfig(const RunOptions &options, bool *profile_enabled)
     } else {
         config = LegacyConfig(options.rank);
     }
-    config.data_scrambling_id = options.data_scrambling_id;
-    config.dmrs_scrambling_id = options.dmrs_scrambling_id;
-    config.rnti = options.rnti;
+    if (!*profile_enabled || options.cell_id_override) {
+        config.data_scrambling_id = options.data_scrambling_id;
+        config.dmrs_scrambling_id = options.dmrs_scrambling_id;
+    }
+    if (!*profile_enabled || options.rnti_override) config.rnti = options.rnti;
+    if (runtime_out != nullptr) *runtime_out = runtime;
     return config;
 }
 
@@ -248,8 +254,8 @@ DeviceBuffer UploadObject(const T &value)
     return buffer;
 }
 
-
-
+// DeviceBuffer is deliberately non-movable; explicit helpers keep ownership
+// visible at every chain resource boundary.
 void UploadPadded(DeviceBuffer &destination, const fs::path &path,
                   size_t logical_bytes)
 {
@@ -305,16 +311,19 @@ int RunImpl(const RunOptions &options)
     }
     const fs::path input_root(options.input_root);
     bool profile_enabled = false;
-    PuschMimoConfig config = ResolveConfig(options, &profile_enabled);
+    PuschMimoRuntimeConfig runtime{};
+    PuschMimoConfig config = ResolveConfig(options, &profile_enabled, &runtime);
     const uint16_t layers = config.num_layers;
-    const uint16_t ports = config.num_tx_ports;
+    const uint16_t logical_ports = config.num_tx_ports;
+    const uint16_t tx_antennas = profile_enabled
+        ? runtime.num_tx_antennas : logical_ports;
     const uint32_t slots = options.num_slots;
 
     AclSession session;
     StaticWeights weights(input_root);
 
-
-
+    // Tile the four deterministic LDPC reference blocks to the production
+    // 143-code-block transport batch, matching the canonical encoder runner.
     const auto four_info = ReadExact(input_root / "golden/input.bin", kInfoFourBytes);
     std::vector<uint8_t> info(airan::INFO_BYTES);
     for (uint32_t cb = 0; cb < airan::LDPC_C_NUM; ++cb) {
@@ -395,9 +404,19 @@ int RunImpl(const RunOptions &options)
     d_dmrs_offsets.Upload(dmrs_offsets.data(), d_dmrs_offsets.bytes());
     d_grid_meta.Upload(&grid_meta, sizeof(grid_meta));
 
+    PuschMimoConfig antenna_config = config;
+    if (profile_enabled) {
+        antenna_config.num_layers = logical_ports;
+        antenna_config.num_tx_ports = tx_antennas;
+        antenna_config.codebook_enabled = static_cast<uint8_t>(
+            MimoPrecodingMode::kNonCodebook);
+        antenna_config.tpmi = 0;
+        antenna_config.prg_size_rb = pc::N_RB;
+    }
+
     PuschMimoLayout remap_layout{};
     std::vector<uint32_t> scatter(re::SCATTER_INDEX_ELEMS);
-    CheckStatus(re::BuildCurrentProfile(config, &remap_layout, scatter.data(),
+    CheckStatus(re::BuildCurrentProfile(antenna_config, &remap_layout, scatter.data(),
                                         scatter.size()) == re::OK,
                 "re_map_batch profile");
     DeviceBuffer d_scatter(scatter.size() * sizeof(scatter[0]));
@@ -424,14 +443,16 @@ int RunImpl(const RunOptions &options)
     DeviceBuffer d_dmrs_im(gm::DmrsElems(layers) * sizeof(uint16_t));
     DeviceBuffer d_layer_grid_re(gm::GridElems(layers) * sizeof(uint16_t));
     DeviceBuffer d_layer_grid_im(gm::GridElems(layers) * sizeof(uint16_t));
-    DeviceBuffer d_port_grid_re(re::PortGridElems(ports) * sizeof(uint16_t));
-    DeviceBuffer d_port_grid_im(re::PortGridElems(ports) * sizeof(uint16_t));
-    DeviceBuffer d_fft_grid_re(re::FftGridElems(ports) * sizeof(uint16_t));
-    DeviceBuffer d_fft_grid_im(re::FftGridElems(ports) * sizeof(uint16_t));
-    DeviceBuffer d_time_re(static_cast<size_t>(ports) * N_TIME_SAMPLES * sizeof(int16_t));
-    DeviceBuffer d_time_im(static_cast<size_t>(ports) * N_TIME_SAMPLES * sizeof(int16_t));
+    DeviceBuffer d_port_grid_re(re::PortGridElems(logical_ports) * sizeof(uint16_t));
+    DeviceBuffer d_port_grid_im(re::PortGridElems(logical_ports) * sizeof(uint16_t));
+    DeviceBuffer d_antenna_grid_re(re::PortGridElems(tx_antennas) * sizeof(uint16_t));
+    DeviceBuffer d_antenna_grid_im(re::PortGridElems(tx_antennas) * sizeof(uint16_t));
+    DeviceBuffer d_fft_grid_re(re::FftGridElems(tx_antennas) * sizeof(uint16_t));
+    DeviceBuffer d_fft_grid_im(re::FftGridElems(tx_antennas) * sizeof(uint16_t));
+    DeviceBuffer d_time_re(static_cast<size_t>(tx_antennas) * N_TIME_SAMPLES * sizeof(int16_t));
+    DeviceBuffer d_time_im(static_cast<size_t>(tx_antennas) * N_TIME_SAMPLES * sizeof(int16_t));
     const size_t iq_slot_bytes =
-        static_cast<size_t>(ports) * N_TIME_SAMPLES * 2 * sizeof(int16_t);
+        static_cast<size_t>(tx_antennas) * N_TIME_SAMPLES * 2 * sizeof(int16_t);
     const size_t iq_total_bytes = static_cast<size_t>(slots) * iq_slot_bytes;
     DeviceBuffer d_iq(iq_total_bytes);
 
@@ -530,14 +551,28 @@ int RunImpl(const RunOptions &options)
                         pc::Status::kSuccess,
                     ("pusch_codebook_precode launch: " + why).c_str());
 
+        const void *air_grid_re = d_port_grid_re.get();
+        const void *air_grid_im = d_port_grid_im.get();
+        if (profile_enabled) {
+            why.clear();
+            CheckStatus(pc::Launch(&precode_runtime, d_port_grid_re.get(),
+                                   d_port_grid_im.get(), antenna_config,
+                                   d_antenna_grid_re.get(), d_antenna_grid_im.get(),
+                                   d_workspace.get(), session.stream(), &why) ==
+                            pc::Status::kSuccess,
+                        ("tx_antenna_map launch: " + why).c_str());
+            air_grid_re = d_antenna_grid_re.get();
+            air_grid_im = d_antenna_grid_im.get();
+        }
+
         re::ReMapBatchOpArgsV1 remap_args{};
         remap_args.abi_version = re::ABI_VERSION;
         remap_args.struct_size = sizeof(remap_args);
-        remap_args.port_grid_re = d_port_grid_re.get();
-        remap_args.port_grid_im = d_port_grid_im.get();
+        remap_args.port_grid_re = air_grid_re;
+        remap_args.port_grid_im = air_grid_im;
         remap_args.fft_grid_re = d_fft_grid_re.get();
         remap_args.fft_grid_im = d_fft_grid_im.get();
-        remap_args.config = &config;
+        remap_args.config = &antenna_config;
         remap_args.layout = &remap_layout;
         remap_args.stream = session.stream();
         CheckStatus(re::Enqueue(remap_args, d_scatter.get(), d_scatter.bytes(),
@@ -550,12 +585,12 @@ int RunImpl(const RunOptions &options)
             d_fft_grid_im.get(), weights.w32r.get(), weights.w32i.get(),
             weights.w64r.get(), weights.w64i.get(), weights.twr.get(),
             weights.twi.get(), d_time_re.get(), d_time_im.get(),
-            d_iq.offset(static_cast<size_t>(slot) * iq_slot_bytes), ports,
+            d_iq.offset(static_cast<size_t>(slot) * iq_slot_bytes), tx_antennas,
             d_workspace.get(), d_ofdm_tiling.get());
         CheckStatus(ofdm_launch == ACL_ERROR_NONE, "ofdm_mod_batch launch");
 
-
-
+        // DMRS runtime reuses pinned host metadata on the next Enqueue. This
+        // slot boundary is the only synchronization inside the fused chain.
         ACL_CHECK(aclrtSynchronizeStream(session.stream()));
     }
 
@@ -574,7 +609,8 @@ int RunImpl(const RunOptions &options)
         std::string json =
             "{\n  \"schema\": \"airan.pusch_mimo.tx_chain.v1\",\n" +
             std::string("  \"rank\": ") + std::to_string(layers) + ",\n" +
-            "  \"tx_ports\": " + std::to_string(ports) + ",\n" +
+            "  \"logical_tx_ports\": " + std::to_string(logical_ports) + ",\n" +
+            "  \"tx_antennas\": " + std::to_string(tx_antennas) + ",\n" +
             "  \"slots\": " + std::to_string(slots) + ",\n" +
             "  \"output_bytes\": " + std::to_string(iq_total_bytes) + ",\n" +
             "  \"nonzero_i16\": " + std::to_string(nonzero) + ",\n" +
@@ -590,13 +626,13 @@ int RunImpl(const RunOptions &options)
 
     pc::RuntimeDestroy(&precode_runtime);
     dg::DestroyRuntime(dmrs_runtime);
-    std::printf("[PASS] fused MIMO TX Rank%u ports=%u slots=%u bytes=%zu %.3f ms profile=%s\n",
-                layers, ports, slots, iq_total_bytes, elapsed,
+    std::printf("[PASS] fused MIMO TX Rank%u logical_ports=%u tx_antennas=%u slots=%u bytes=%zu %.3f ms profile=%s\n",
+                layers, logical_ports, tx_antennas, slots, iq_total_bytes, elapsed,
                 profile_enabled ? "runtime" : "legacy");
     return 0;
 }
 
-}
+}  // namespace
 
 int Run(const RunOptions &options)
 {
@@ -608,7 +644,7 @@ int Run(const RunOptions &options)
     }
 }
 
-}
+}  // namespace airan::pusch_mimo_tx_chain
 
 int main(int argc, char **argv)
 {
@@ -634,8 +670,10 @@ int main(int argc, char **argv)
             const auto value = static_cast<uint16_t>(std::strtoul(require_value("--cell-id"), nullptr, 10));
             options.data_scrambling_id = value;
             options.dmrs_scrambling_id = value;
+            options.cell_id_override = true;
         } else if (argument == "--rnti") {
             options.rnti = static_cast<uint16_t>(std::strtoul(require_value("--rnti"), nullptr, 10));
+            options.rnti_override = true;
         } else {
             std::fprintf(stderr, "unknown argument: %s\n", argument.c_str());
             return 2;

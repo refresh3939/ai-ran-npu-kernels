@@ -3,6 +3,9 @@ set -euo pipefail
 
 CURRENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "${CURRENT_DIR}"
+RUN_ROOT=${AIRAN_RUN_ROOT:-${CURRENT_DIR}}
+BUILD_DIR=${AIRAN_BUILD_DIR:-${RUN_ROOT}/build}
+OUT_DIR=${AIRAN_OUT_DIR:-${RUN_ROOT}/out}
 export ASCEND_HOME_DIR=${ASCEND_HOME_DIR:-/usr/local/Ascend/ascend-toolkit/latest}
 set +eu
 if [[ -f "${ASCEND_HOME_DIR}/bin/setenv.bash" ]]; then
@@ -12,7 +15,7 @@ else
 fi
 set -eu
 
-export AIRAN_DATA_DIR=${AIRAN_DATA_DIR:-${CURRENT_DIR}/data}
+export AIRAN_DATA_DIR=${AIRAN_DATA_DIR:-${RUN_ROOT}/data}
 SOC_VERSION=${SOC_VERSION:-Ascend310P1}
 IO_PACK_RX_CAPACITY=${IO_PACK_RX_CAPACITY:-64}
 IO_PACK_LAYER_CAPACITY=${IO_PACK_LAYER_CAPACITY:-16}
@@ -29,17 +32,17 @@ IO_PACK_LAYER_CAPACITY="${IO_PACK_LAYER_CAPACITY}" \
 python3 "${CURRENT_DIR}/scripts/gen_data.py" "${GEN_ARGS[@]}"
 mkdir -p "${AIRAN_DATA_DIR}/ascend_output"
 
-rm -rf "${CURRENT_DIR}/build" "${CURRENT_DIR}/out"
-cmake -S "${CURRENT_DIR}" -B "${CURRENT_DIR}/build" \
+rm -rf "${BUILD_DIR}" "${OUT_DIR}"
+cmake -S "${CURRENT_DIR}" -B "${BUILD_DIR}" \
     -DRUN_MODE=npu -DSOC_VERSION="${SOC_VERSION}" \
     -DASCEND_CANN_PACKAGE_PATH="${ASCEND_HOME_DIR}" \
     -DIO_PACK_RX_CAPACITY="${IO_PACK_RX_CAPACITY}" \
     -DIO_PACK_LAYER_CAPACITY="${IO_PACK_LAYER_CAPACITY}" \
-    -DCMAKE_INSTALL_PREFIX="${CURRENT_DIR}/out"
-cmake --build "${CURRENT_DIR}/build" -j"$(nproc)"
-cmake --install "${CURRENT_DIR}/build"
-export LD_LIBRARY_PATH="${CURRENT_DIR}/out/lib:${ASCEND_HOME_DIR}/lib64:${LD_LIBRARY_PATH:-}"
-"${CURRENT_DIR}/out/bin/ascendc_kernels_bbit"
+    -DCMAKE_INSTALL_PREFIX="${OUT_DIR}"
+cmake --build "${BUILD_DIR}" -j"$(nproc)"
+cmake --install "${BUILD_DIR}"
+export LD_LIBRARY_PATH="${OUT_DIR}/lib:${ASCEND_HOME_DIR}/lib64:${LD_LIBRARY_PATH:-}"
+"${OUT_DIR}/bin/ascendc_kernels_bbit"
 IO_PACK_RX_CAPACITY="${IO_PACK_RX_CAPACITY}" \
 IO_PACK_LAYER_CAPACITY="${IO_PACK_LAYER_CAPACITY}" \
 python3 "${CURRENT_DIR}/scripts/verify_result.py"

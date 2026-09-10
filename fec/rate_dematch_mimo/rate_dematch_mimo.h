@@ -1,7 +1,7 @@
-
-
-
-
+/**
+ * @file rate_dematch_mimo.h
+ * Runtime Rank-1..4, up-to-23-slot NR LDPC rate de-matching contract.
+ */
 #pragma once
 
 #include <cstddef>
@@ -20,26 +20,26 @@ constexpr uint32_t N_SC_USED = 1596;
 constexpr uint32_t N_DATA_RE = N_DATA_SYMBOLS * N_SC_USED;
 constexpr uint32_t N_DATA_PAD = 19200;
 
-
+// First supported FEC profile: the already verified SISO BG1/Z384 profile.
 constexpr uint32_t C_NUM = 143;
 constexpr uint32_t LDPC_Z = 384;
 constexpr uint32_t LDPC_N = 26112;
 constexpr uint32_t N_2Z = 2 * LDPC_Z;
 constexpr uint32_t N_CB_BUF = LDPC_N - N_2Z;
 constexpr uint32_t BLOCK_DIM = 4;
-constexpr int16_t LLR_SCALE = 8;
+constexpr int16_t LLR_SCALE = 8;   // Q11.5 -> Q8.8
 constexpr int16_t LLR_CLIP = 5120;
 
 constexpr uint32_t DESC_WORDS = 4;
 constexpr uint32_t DESC_TABLE_WORDS = C_NUM * DESC_WORDS;
-constexpr uint32_t DESC_PAD_WORDS = 576;
+constexpr uint32_t DESC_PAD_WORDS = 576;  // 32-byte aligned GM allocation
 constexpr uint32_t META_WORDS = 32;
 constexpr uint32_t TILE_ELEMS = 8192;
 constexpr uint32_t TILE_PAD_ELEMS = TILE_ELEMS + 16;
 constexpr size_t TILING_BYTES = META_WORDS * sizeof(uint32_t);
 constexpr size_t DESCRIPTOR_BYTES = DESC_PAD_WORDS * sizeof(uint32_t);
 constexpr size_t WORKSPACE_BYTES = 128;
-constexpr uint32_t META_MAGIC = 0x52444d31u;
+constexpr uint32_t META_MAGIC = 0x52444d31u;  // "RDM1"
 
 using PuschMimoConfig = ::airan::PuschMimoConfig;
 using PuschMimoLayout = ::airan::PuschMimoLayout;
@@ -53,8 +53,8 @@ enum Status : int32_t {
     LAUNCH_FAILED = -5,
 };
 
-
-
+// Per-CB TS 38.212 descriptor. cw_symbol_offset is measured in symbols within
+// each canonical NR bit plane after concatenating valid prefixes of all slots.
 struct RateMatchDescriptor {
     uint32_t e;
     uint32_t k0;
@@ -87,8 +87,8 @@ struct KernelMetadata {
 static_assert(sizeof(KernelMetadata) == TILING_BYTES,
               "rate_dematch_mimo metadata ABI must remain 128 bytes");
 
-
-
+// One slot batch is one codeword. The transmitted bit count is
+// G=num_slots*Qm*num_layers*N_DATA_RE. Storage tails are never counted in G.
 struct RateDematchMimoOpArgsV1 {
     uint16_t abi_version;
     uint16_t struct_size;
@@ -109,8 +109,8 @@ Status BuildCurrentProfile(const PuschMimoConfig &config,
 
 Status ValidateOpArgs(const RateDematchMimoOpArgsV1 &args);
 
-
-
+// Bit-exact scalar host oracle. It performs inverse modulation interleaving,
+// rv0 circular-buffer placement/repetition combining, scaling and clipping.
 Status ReferenceRateDematch(const int16_t *cw_llr,
                             const PuschMimoConfig &config,
                             const PuschMimoLayout &layout,
@@ -119,8 +119,8 @@ Status ReferenceRateDematch(const int16_t *cw_llr,
                             size_t descriptor_count,
                             int16_t *ldpc_llr);
 
-
-
+// Enqueues one native launch. descriptor/workspace/tiling are adapter-owned
+// cached device resources and are not business tensor inputs.
 Status Enqueue(const RateDematchMimoOpArgsV1 &args,
                const void *descriptors,
                size_t descriptor_bytes,
@@ -136,4 +136,4 @@ constexpr size_t OutputElems() {
     return static_cast<size_t>(C_NUM) * LDPC_N;
 }
 
-}
+}  // namespace airan::rate_dematch_mimo
